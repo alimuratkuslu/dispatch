@@ -30,19 +30,19 @@
 ### Using Homebrew (Recommended)
 
 ```bash
-brew tap YOUR_USERNAME/tap
+brew tap alimuratkuslu/tap
 brew install --cask dispatch
 ```
 
 ### Manual Download
 
-1. Go to the [Releases](https://github.com/YOUR_USERNAME/dispatch/releases) page.
+1. Go to the [Releases](https://github.com/alimuratkuslu/dispatch/releases) page.
 2. Download the `Dispatch.zip` file.
 3. Move `Dispatch.app` to your `/Applications` folder.
 
 ## 🛠 Setup for Developers
 
-1. Clone the repository: `git clone https://github.com/YOUR_USERNAME/dispatch.git`
+1. Clone the repository: `git clone https://github.com/alimuratkuslu/dispatch.git`
 2. Configure Secrets: 
    - Copy `Dispatch/App/Secrets.swift.example` to `Dispatch/App/Secrets.swift`.
    - Enter your [GitHub OAuth Client ID](https://github.com/settings/developers).
