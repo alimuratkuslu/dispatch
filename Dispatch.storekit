@@ -1,0 +1,36 @@
+{
+  "identifier" : "dispatch-storekit-config",
+  "nonConsumableProducts" : [
+    {
+      "displayPrice" : "10.99",
+      "familyShareable" : false,
+      "internalID" : "pro-monthly",
+      "localizations" : [
+        {
+          "description" : "Unlimited repositories and all upcoming Pro features.",
+          "displayName" : "Dispatch Pro",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.dispatch.pro",
+      "referenceName" : "Dispatch Pro",
+      "type" : "NonConsumable"
+    }
+  ],
+  "settings" : {
+    "_applicationInternalID" : "com.dispatch.app",
+    "_storefront" : "USA",
+    "_storeKitErrors" : [
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Load Products"
+      }
+    ]
+  },
+  "version" : {
+    "major" : 3,
+    "minor" : 0,
+    "patch" : 0
+  }
+}

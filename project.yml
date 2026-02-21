@@ -1,0 +1,79 @@
+name: Dispatch
+options:
+  bundleIdPrefix: com.dispatch
+  minimumXcodeGenVersion: "2.40"
+  createIntermediateGroups: true
+  xcodeVersion: "26.2"
+
+targets:
+  Dispatch:
+    type: application
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: Dispatch
+        excludes:
+          - "**/.DS_Store"
+    info:
+      path: Dispatch/App/Info.plist
+      properties:
+        CFBundleName: Dispatch
+        CFBundleDisplayName: Dispatch
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "1"
+        LSUIElement: true
+        NSSupportsAutomaticTermination: false
+        NSUserNotificationAlertStyle: banner
+        NSPrincipalClass: NSApplication
+    entitlements:
+      path: Dispatch/App/Dispatch.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.dispatch.app
+        PRODUCT_MODULE_NAME: DispatchApp
+        SWIFT_VERSION: "5.0"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        ENABLE_HARDENED_RUNTIME: YES
+        SWIFT_STRICT_CONCURRENCY: minimal
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: "1.0.0"
+        GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+
+  DispatchTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - DispatchTests
+    dependencies:
+      - target: Dispatch
+    entitlements:
+      path: DispatchTests/DispatchTests.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.dispatch.tests
+        SWIFT_VERSION: "5.0"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        SWIFT_STRICT_CONCURRENCY: minimal
+        GENERATE_INFOPLIST_FILE: YES
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Dispatch.app/Contents/MacOS/Dispatch"
+
+schemes:
+  Dispatch:
+    build:
+      targets:
+        Dispatch: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - DispatchTests
+    profile:
+      config: Release
+    archive:
+      config: Release

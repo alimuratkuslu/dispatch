@@ -1,0 +1,528 @@
+import Foundation
+
+final class GitHubAPIClient {
+    private let keychain: KeychainService
+    private let session: URLSession
+    private var restETagCache: [String: String] = [:]
+    private var restResponseCache: [String: Data] = [:]
+
+    private let graphqlEndpoint = URL(string: "https://api.github.com/graphql")!
+    private let restBase = "https://api.github.com"
+
+    init(keychainService: KeychainService) {
+        self.keychain = keychainService
+        let config = URLSessionConfiguration.ephemeral
+        config.httpAdditionalHeaders = ["Accept": "application/vnd.github+json",
+                                        "X-GitHub-Api-Version": "2022-11-28"]
+        self.session = URLSession(configuration: config)
+    }
+
+    // MARK: - Token helpers
+    private func token() async throws -> String {
+        try await keychain.load(account: "github")
+    }
+
+    // MARK: - Auth header
+    private func authHeaders(token: String) -> [String: String] {
+        ["Authorization": "Bearer \(token)"]
+    }
+
+    // MARK: - User info
+    func fetchCurrentUser() async throws -> Account {
+        let tok = try await token()
+        return try await fetchCurrentUser(token: tok)
+    }
+
+    func fetchCurrentUser(token tok: String) async throws -> Account {
+        let url = URL(string: "\(restBase)/user")!
+        var request = URLRequest(url: url)
+        authHeaders(token: tok).forEach { request.setValue($1, forHTTPHeaderField: $0) }
+
+        let (data, response) = try await session.data(for: request)
+        try validateResponse(response, data: data)
+
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let raw = try decoder.decode(RawUser.self, from: data)
+        let avatarURL = URL(string: raw.avatarUrl) ?? URL(string: "https://github.com/ghost.png")!
+        return Account(login: raw.login, avatarURL: avatarURL)
+    }
+
+    // MARK: - Repositories
+    func fetchUserRepos() async throws -> [MonitoredRepo] {
+        let tok = try await token()
+        var repos: [MonitoredRepo] = []
+        var page = 1
+        var keepGoing = true
+
+        while keepGoing {
+            let urlStr = "\(restBase)/user/repos?per_page=100&page=\(page)&sort=pushed&type=all"
+            let url = URL(string: urlStr)!
+            var request = URLRequest(url: url)
+            authHeaders(token: tok).forEach { request.setValue($1, forHTTPHeaderField: $0) }
+
+            if let etag = restETagCache[urlStr] {
+                request.setValue(etag, forHTTPHeaderField: "If-None-Match")
+            }
+
+            let (data, response) = try await session.data(for: request)
+            let http = response as! HTTPURLResponse
+
+            if http.statusCode == 304, let cached = restResponseCache[urlStr] {
+                let raw = try JSONDecoder().decode([RawRepo].self, from: cached)
+                return raw.map { $0.toMonitoredRepo() }
+            }
+
+            try validateResponse(response, data: data)
+
+            if let etag = http.value(forHTTPHeaderField: "ETag") {
+                restETagCache[urlStr] = etag
+                restResponseCache[urlStr] = data
+            }
+
+            let rawRepos = try JSONDecoder().decode([RawRepo].self, from: data)
+            repos.append(contentsOf: rawRepos.map { $0.toMonitoredRepo() })
+
+            keepGoing = rawRepos.count == 100
+            page += 1
+        }
+        return repos
+    }
+
+    // MARK: - Main GraphQL poll
+    func fetchPRData(repo: MonitoredRepo) async throws -> (prs: [PullRequest], viewerLogin: String, ciRun: CIRun?) {
+        let tok = try await token()
+        let body = GraphQLBody(query: GitHubGraphQL.pollQuery,
+                               variables: ["owner": .string(repo.owner), "name": .string(repo.name)])
+        let bodyData = try JSONEncoder().encode(body)
+
+        var request = URLRequest(url: graphqlEndpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        authHeaders(token: tok).forEach { request.setValue($1, forHTTPHeaderField: $0) }
+        request.httpBody = bodyData
+
+        let (data, response) = try await session.data(for: request)
+        try validateResponse(response, data: data)
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { dec in
+            let s = try dec.singleValueContainer().decode(String.self)
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = formatter.date(from: s) { return date }
+            formatter.formatOptions = [.withInternetDateTime]
+            if let date = formatter.date(from: s) { return date }
+            throw DecodingError.dataCorrupted(.init(codingPath: dec.codingPath, debugDescription: "Bad date: \(s)"))
+        }
+
+        let response2 = try decoder.decode(GraphQLResponse<PollData>.self, from: data)
+
+        if let errors = response2.errors, !errors.isEmpty {
+            throw APIError.graphQLError(errors.map(\.message).joined(separator: "; "))
+        }
+
+        guard let pollData = response2.data else {
+            throw APIError.graphQLError("Empty response data")
+        }
+
+        let viewerLogin = pollData.viewer.login
+        let repoData = pollData.repository
+
+        let prs = (repoData?.pullRequests.nodes ?? []).map { node -> PullRequest in
+            node.toPullRequest(repoFullName: repo.fullName)
+        }
+
+        let ciRun: CIRun?
+        if let defaultBranch = repoData?.defaultBranchRef,
+           let rollup = defaultBranch.target?.statusCheckRollup {
+            let status = CIStatus(rollupState: rollup.state)
+            ciRun = CIRun(
+                id: "\(repo.fullName):\(defaultBranch.name)",
+                repoFullName: repo.fullName,
+                branch: defaultBranch.name,
+                status: status,
+                url: URL(string: "https://github.com/\(repo.fullName)/actions"),
+                updatedAt: Date()
+            )
+        } else {
+            ciRun = nil
+        }
+
+        return (prs, viewerLogin, ciRun)
+    }
+
+    // MARK: - PR merge status
+    /// Returns true if the PR was merged, false if it was closed without merging.
+    /// Uses GET /repos/{owner}/{repo}/pulls/{number}/merge → 204 = merged, 404 = not merged.
+    func checkIsPRMerged(owner: String, repo: String, number: Int) async throws -> Bool {
+        let tok = try await token()
+        let url = URL(string: "\(restBase)/repos/\(owner)/\(repo)/pulls/\(number)/merge")!
+        var request = URLRequest(url: url)
+        authHeaders(token: tok).forEach { request.setValue($1, forHTTPHeaderField: $0) }
+        let (_, response) = try await session.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        return status == 204
+    }
+
+    // MARK: - Rate limit check
+    func checkRateLimit() async throws -> (remaining: Int, resetDate: Date) {
+        let tok = try await token()
+        let url = URL(string: "\(restBase)/rate_limit")!
+        var request = URLRequest(url: url)
+        authHeaders(tok: tok).forEach { request.setValue($1, forHTTPHeaderField: $0) }
+        if let etag = restETagCache["rate_limit"] {
+            request.setValue(etag, forHTTPHeaderField: "If-None-Match")
+        }
+        let (data, response) = try await session.data(for: request)
+        let http = response as! HTTPURLResponse
+        if let etag = http.value(forHTTPHeaderField: "ETag") { restETagCache["rate_limit"] = etag }
+        try validateResponse(response, data: data)
+        let raw = try JSONDecoder().decode(RateLimitResponse.self, from: data)
+        return (raw.rate.remaining, Date(timeIntervalSince1970: TimeInterval(raw.rate.reset)))
+    }
+
+    // MARK: - OAuth Device Flow
+    struct DeviceCodeResponse {
+        let deviceCode: String
+        let userCode: String
+        let verificationURI: URL
+        let interval: Int
+        let expiresIn: Int
+    }
+
+    func requestDeviceCode(clientID: String) async throws -> DeviceCodeResponse {
+        let url = URL(string: "https://github.com/login/device/code")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        // Remove API-specific headers that don't apply to the OAuth endpoint
+        request.setValue(nil, forHTTPHeaderField: "X-GitHub-Api-Version")
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        let body = "client_id=\(clientID)&scope=repo%20read:user%20notifications"
+        request.httpBody = body.data(using: .utf8)
+
+        let (data, response) = try await session.data(for: request)
+
+        // Log raw response for debugging
+        if let rawStr = String(data: data, encoding: .utf8) {
+            print("[DeviceFlow] Raw response: \(rawStr.prefix(300))")
+        }
+
+        // 1. Try JSON success response first
+        if let json = try? JSONDecoder().decode(DeviceCodeJSONResponse.self, from: data),
+           !json.device_code.isEmpty {
+            return DeviceCodeResponse(
+                deviceCode: json.device_code,
+                userCode: json.user_code,
+                verificationURI: URL(string: json.verification_uri) ?? URL(string: "https://github.com/login/device")!,
+                interval: json.interval,
+                expiresIn: json.expires_in
+            )
+        }
+
+        // 2. Check for JSON error response (e.g. {"error":"Not Found","error_description":"..."})
+        if let errResp = try? JSONDecoder().decode(OAuthErrorResponse.self, from: data),
+           let errMsg = errResp.error_description ?? errResp.error {
+            let hint = errResp.error == "Not Found"
+                ? "\n\nMake sure Device Flow is enabled for your OAuth App at github.com/settings/developers."
+                : ""
+            throw APIError.graphQLError(errMsg + hint)
+        }
+
+        // 3. Fall back to form-encoded response
+        let str = String(data: data, encoding: .utf8) ?? ""
+        let params = parseFormEncoded(str)
+
+        if let err = params["error"] {
+            let desc = (params["error_description"] ?? err)
+                .replacingOccurrences(of: "+", with: " ")
+            throw APIError.graphQLError(desc)
+        }
+
+        guard let deviceCode = params["device_code"],
+              let userCode = params["user_code"],
+              let uriStr = params["verification_uri"],
+              let uri = URL(string: uriStr) else {
+            let http = (response as? HTTPURLResponse)?.statusCode ?? 0
+            throw APIError.graphQLError(
+                "GitHub returned an unexpected response (HTTP \(http)).\n" +
+                "Tip: Make sure Device Flow is enabled on your OAuth App, " +
+                "or switch to Personal Access Token mode."
+            )
+        }
+
+        return DeviceCodeResponse(
+            deviceCode: deviceCode, userCode: userCode,
+            verificationURI: uri,
+            interval: Int(params["interval"] ?? "5") ?? 5,
+            expiresIn: Int(params["expires_in"] ?? "900") ?? 900
+        )
+    }
+
+    func pollForToken(clientID: String, deviceCode: String) async throws -> String {
+        let url = URL(string: "https://github.com/login/oauth/access_token")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(nil, forHTTPHeaderField: "X-GitHub-Api-Version")
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        let grantType = "urn:ietf:params:oauth:grant-type:device_code"
+        let body = "client_id=\(clientID)&device_code=\(deviceCode)&grant_type=\(grantType)"
+        request.httpBody = body.data(using: .utf8)
+
+        let (data, _) = try await session.data(for: request)
+
+        // Try JSON (preferred — set Accept: application/json)
+        let decoder = JSONDecoder()
+        if let json = try? decoder.decode(TokenJSONResponse.self, from: data) {
+            if let token = json.access_token, !token.isEmpty { return token }
+            switch json.error ?? "" {
+            case "authorization_pending": throw APIError.deviceFlowPending
+            case "slow_down":            throw APIError.deviceFlowSlowDown
+            case "expired_token":        throw APIError.deviceFlowExpired
+            case "access_denied":        throw APIError.deviceFlowAccessDenied
+            case let e where !e.isEmpty:
+                let desc = json.error_description ?? e
+                throw APIError.graphQLError(desc)
+            default: break
+            }
+        }
+
+        // Form-encoded fallback
+        let str = String(data: data, encoding: .utf8) ?? ""
+        let params = parseFormEncoded(str)
+        if let token = params["access_token"], !token.isEmpty { return token }
+        switch params["error"] ?? "" {
+        case "authorization_pending": throw APIError.deviceFlowPending
+        case "slow_down":            throw APIError.deviceFlowSlowDown
+        case "expired_token":        throw APIError.deviceFlowExpired
+        case "access_denied":        throw APIError.deviceFlowAccessDenied
+        case let e where !e.isEmpty:
+            let desc = (params["error_description"] ?? e).replacingOccurrences(of: "+", with: " ")
+            throw APIError.graphQLError(desc)
+        default: break
+        }
+        throw APIError.graphQLError("No token received. Please try again.")
+    }
+
+    // MARK: - Helpers
+    private func validateResponse(_ response: URLResponse, data: Data) throws {
+        guard let http = response as? HTTPURLResponse else { return }
+        let headers = http.allHeaderFields
+        if let error = APIError.from(statusCode: http.statusCode, headers: headers) {
+            throw error
+        }
+    }
+
+    private func parseFormEncoded(_ str: String) -> [String: String] {
+        var result: [String: String] = [:]
+        for pair in str.split(separator: "&") {
+            let kv = pair.split(separator: "=", maxSplits: 1)
+            if kv.count == 2 {
+                let key = String(kv[0]).removingPercentEncoding ?? String(kv[0])
+                let val = String(kv[1]).removingPercentEncoding ?? String(kv[1])
+                result[key] = val
+            }
+        }
+        return result
+    }
+
+    private func authHeaders(tok: String) -> [String: String] {
+        ["Authorization": "Bearer \(tok)"]
+    }
+}
+
+// MARK: - Raw API shapes
+
+private struct GraphQLBody: Encodable {
+    let query: String
+    let variables: [String: JSONValue]
+}
+
+private enum JSONValue: Encodable {
+    case string(String)
+    case int(Int)
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        switch self { case .string(let s): try c.encode(s); case .int(let i): try c.encode(i) }
+    }
+}
+
+private struct GraphQLResponse<T: Decodable>: Decodable {
+    let data: T?
+    let errors: [GraphQLErrorItem]?
+}
+private struct GraphQLErrorItem: Decodable { let message: String }
+
+private struct PollData: Decodable {
+    let viewer: ViewerNode
+    let repository: RepoNode?
+}
+private struct ViewerNode: Decodable { let login: String }
+private struct RepoNode: Decodable {
+    let pullRequests: NodesWrapper<PRNode>
+    let defaultBranchRef: DefaultBranchNode?
+}
+private struct NodesWrapper<T: Decodable>: Decodable { let nodes: [T] }
+private struct DefaultBranchNode: Decodable {
+    let name: String
+    let target: BranchTargetNode?
+}
+private struct BranchTargetNode: Decodable {
+    let statusCheckRollup: StatusRollupNode?
+}
+private struct StatusRollupNode: Decodable { let state: String }
+
+private struct PRNode: Decodable {
+    let id: String
+    let number: Int
+    let title: String
+    let url: String
+    let headRefName: String
+    let createdAt: Date
+    let updatedAt: Date
+    let isDraft: Bool
+    let author: AuthorNode?
+    let reviewRequests: NodesWrapper<ReviewRequestNode>?
+    let comments: NodesWrapper<CommentNode>?
+    let reviews: NodesWrapper<ReviewNode>?
+    let reviewThreads: NodesWrapper<ThreadNode>?
+    let commits: NodesWrapper<CommitWrapperNode>?
+
+    func toPullRequest(repoFullName: String) -> PullRequest {
+        let prAuthor = author.map { PRAuthor(login: $0.login, avatarURL: URL(string: $0.avatarUrl) ?? URL(string: "https://github.com/ghost.png")!, isBot: $0.__typename == "Bot") } ?? PRAuthor(login: "unknown", avatarURL: URL(string: "https://github.com/ghost.png")!)
+        let prURL = URL(string: url) ?? URL(string: "https://github.com")!
+        let reviewerLogins: [String] = (reviewRequests?.nodes ?? []).compactMap { $0.requestedReviewer?.login }
+        let ciStatus: CIStatus
+        let headCommit = commits?.nodes.first?.commit
+        if let rollup = headCommit?.statusCheckRollup {
+            ciStatus = CIStatus(rollupState: rollup.state)
+        } else { ciStatus = .unknown }
+        // First line of the commit message only (trim after newline)
+        let commitMsg = headCommit?.message.flatMap { $0.isEmpty ? nil : String($0.prefix(upTo: $0.firstIndex(of: "\n") ?? $0.endIndex)) }
+        let mappedComments = (comments?.nodes ?? []).map { node -> PRComment in
+            let a = PRAuthor(login: node.author?.login ?? "ghost", avatarURL: URL(string: node.author?.avatarUrl ?? "") ?? URL(string: "https://github.com/ghost.png")!, isBot: node.author?.__typename == "Bot")
+            return PRComment(id: node.id, body: node.body, author: a, createdAt: node.createdAt, updatedAt: node.updatedAt, prNodeID: id)
+        }
+        let mappedReviews = (reviews?.nodes ?? []).map { node -> PRReview in
+            let a = PRAuthor(login: node.author?.login ?? "ghost", avatarURL: URL(string: node.author?.avatarUrl ?? "") ?? URL(string: "https://github.com/ghost.png")!, isBot: node.author?.__typename == "Bot")
+            let state = ReviewState(rawValue: node.state) ?? .commented
+            return PRReview(id: node.id, state: state, body: node.body, author: a, submittedAt: node.submittedAt, prNodeID: id)
+        }
+        let mappedThreads = (reviewThreads?.nodes ?? []).map { thread -> ReviewThread in
+            let threadComments = thread.comments.nodes.map { c -> ThreadComment in
+                let a = PRAuthor(login: c.author?.login ?? "ghost", avatarURL: URL(string: c.author?.avatarUrl ?? "") ?? URL(string: "https://github.com/ghost.png")!, isBot: c.author?.__typename == "Bot")
+                return ThreadComment(id: c.id, body: c.body, author: a, createdAt: c.createdAt, isOutdated: c.outdated, replyToID: c.replyTo?.id)
+            }
+            return ReviewThread(id: thread.id, path: thread.path, line: thread.line, isResolved: thread.isResolved, comments: threadComments, prNodeID: id)
+        }
+        return PullRequest(id: id, number: number, title: title, url: prURL, author: prAuthor, repoFullName: repoFullName, isDraft: isDraft, headRefName: headRefName, latestCommitMessage: commitMsg, createdAt: createdAt, updatedAt: updatedAt, reviews: mappedReviews, comments: mappedComments, reviewThreads: mappedThreads, ciStatus: ciStatus, requestedReviewerLogins: reviewerLogins)
+    }
+}
+
+private struct AuthorNode: Decodable {
+    let login: String
+    let avatarUrl: String
+    let __typename: String
+
+    private enum CodingKeys: String, CodingKey {
+        case login, avatarUrl, __typename
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        login      = (try? c.decodeIfPresent(String.self, forKey: .login))      ?? "ghost"
+        avatarUrl  = (try? c.decodeIfPresent(String.self, forKey: .avatarUrl))  ?? "https://github.com/ghost.png"
+        __typename = (try? c.decodeIfPresent(String.self, forKey: .__typename)) ?? "User"
+    }
+}
+private struct ReviewRequestNode: Decodable {
+    let requestedReviewer: RequestedReviewerNode?
+}
+private struct RequestedReviewerNode: Decodable {
+    let login: String?
+}
+private struct CommentNode: Decodable {
+    let id: String
+    let body: String
+    let author: AuthorNode?
+    let createdAt: Date
+    let updatedAt: Date
+}
+private struct ReviewNode: Decodable {
+    let id: String
+    let state: String
+    let body: String
+    let author: AuthorNode?
+    let submittedAt: Date
+}
+private struct ThreadNode: Decodable {
+    let id: String
+    let path: String
+    let line: Int?
+    let isResolved: Bool
+    let comments: NodesWrapper<ThreadCommentNode>
+}
+private struct ThreadCommentNode: Decodable {
+    let id: String
+    let body: String
+    let author: AuthorNode?
+    let createdAt: Date
+    let outdated: Bool
+    let replyTo: ReplyToNode?
+}
+private struct ReplyToNode: Decodable { let id: String }
+private struct CommitWrapperNode: Decodable {
+    let commit: CommitNode
+}
+private struct CommitNode: Decodable {
+    let message: String?
+    let statusCheckRollup: StatusRollupNode?
+}
+private struct RawUser: Decodable {
+    let login: String
+    let avatarUrl: String
+}
+private struct RawRepo: Decodable {
+    let nodeId: String
+    let fullName: String
+    let owner: RawOwner
+    let name: String
+    let defaultBranch: String
+    enum CodingKeys: String, CodingKey {
+        case nodeId = "node_id"
+        case fullName = "full_name"
+        case owner, name
+        case defaultBranch = "default_branch"
+    }
+    func toMonitoredRepo() -> MonitoredRepo {
+        MonitoredRepo(id: nodeId, fullName: fullName, owner: owner.login, name: name, defaultBranch: defaultBranch)
+    }
+}
+private struct RawOwner: Decodable { let login: String }
+private struct DeviceCodeJSONResponse: Decodable {
+    let device_code: String
+    let user_code: String
+    let verification_uri: String
+    let interval: Int
+    let expires_in: Int
+}
+private struct TokenJSONResponse: Decodable {
+    let access_token: String?
+    let error: String?
+    let error_description: String?
+}
+/// Generic GitHub OAuth error envelope — all fields optional so decoding always succeeds.
+private struct OAuthErrorResponse: Decodable {
+    let error: String?
+    let error_description: String?
+    let message: String?
+}
+private struct RateLimitResponse: Decodable {
+    let rate: RateLimitData
+}
+private struct RateLimitData: Decodable {
+    let remaining: Int
+    let reset: Int
+}
