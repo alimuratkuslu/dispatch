@@ -18,6 +18,7 @@ struct NotificationPreferences: Codable {
 
 final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     private var sentIDs: Set<String> = []
+    private let lock = NSLock()
     private(set) var permissionGranted: Bool = false
 
     override init() {
@@ -25,7 +26,25 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     }
 
     func setup() {
+        registerDefaults()
         UNUserNotificationCenter.current().delegate = self
+    }
+
+    private func registerDefaults() {
+        let defaults: [String: Any] = [
+            "notif.enabled": true,
+            "notif.newPREnabled": true,
+            "notif.ciFailEnabled": true,
+            "notif.ciFixEnabled": true,
+            "notif.reviewReqEnabled": true,
+            "notif.approvalEnabled": true,
+            "notif.changesEnabled": true,
+            "notif.mergeEnabled": true,
+            "notif.closedEnabled": true,
+            "notif.commentEnabled": true,
+            "notif.copilotEnabled": true
+        ]
+        UserDefaults.standard.register(defaults: defaults)
     }
 
     func requestPermission() async {
@@ -88,8 +107,14 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     // MARK: - Event fires
 
     private func fire(identifier: String, title: String, body: String, userInfo: [AnyHashable: Any] = [:]) {
-        guard !sentIDs.contains(identifier) else { return }
-        sentIDs.insert(identifier)
+        lock.lock()
+        let isSent = sentIDs.contains(identifier)
+        if !isSent {
+            sentIDs.insert(identifier)
+        }
+        lock.unlock()
+        
+        guard !isSent else { return }
         
         let content = UNMutableNotificationContent()
         content.title = title
@@ -101,7 +126,9 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         UNUserNotificationCenter.current().add(req) { [weak self] error in
             if let error = error {
                 print("[NotificationManager] ❌ Failed to add request \(identifier): \(error)")
-                DispatchQueue.main.async { self?.sentIDs.remove(identifier) }
+                self?.lock.lock()
+                self?.sentIDs.remove(identifier)
+                self?.lock.unlock()
             } else {
                 print("[NotificationManager] ✅ Added request \(identifier)")
             }

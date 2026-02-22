@@ -1,6 +1,6 @@
 import Foundation
 
-final class GitHubAPIClient {
+actor GitHubAPIClient {
     private let keychain: KeychainService
     private let session: URLSession
     private var restETagCache: [String: String] = [:]
@@ -68,9 +68,14 @@ final class GitHubAPIClient {
             let (data, response) = try await session.data(for: request)
             let http = response as! HTTPURLResponse
 
-            if http.statusCode == 304, let cached = restResponseCache[urlStr] {
-                let raw = try JSONDecoder().decode([RawRepo].self, from: cached)
-                return raw.map { $0.toMonitoredRepo() }
+            if http.statusCode == 304 {
+                if let cached = restResponseCache[urlStr] {
+                    let raw = try JSONDecoder().decode([RawRepo].self, from: cached)
+                    return raw.map { $0.toMonitoredRepo() }
+                } else {
+                    restETagCache.removeValue(forKey: urlStr)
+                    continue
+                }
             }
 
             try validateResponse(response, data: data)
@@ -294,20 +299,13 @@ final class GitHubAPIClient {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        // Remove API-specific headers that don't apply to the OAuth endpoint
-        request.setValue(nil, forHTTPHeaderField: "X-GitHub-Api-Version")
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         let body = "client_id=\(clientID)&scope=repo%20read:user%20notifications"
         request.httpBody = body.data(using: .utf8)
 
-        let (data, response) = try await session.data(for: request)
+        let authSession = URLSession(configuration: .ephemeral)
+        let (data, _) = try await authSession.data(for: request)
 
-        // Log raw response for debugging
-        if let rawStr = String(data: data, encoding: .utf8) {
-            print("[DeviceFlow] Raw response: \(rawStr.prefix(300))")
-        }
-
-        // 1. Try JSON success response first
         if let json = try? JSONDecoder().decode(DeviceCodeJSONResponse.self, from: data),
            !json.device_code.isEmpty {
             return DeviceCodeResponse(
@@ -319,43 +317,7 @@ final class GitHubAPIClient {
             )
         }
 
-        // 2. Check for JSON error response (e.g. {"error":"Not Found","error_description":"..."})
-        if let errResp = try? JSONDecoder().decode(OAuthErrorResponse.self, from: data),
-           let errMsg = errResp.error_description ?? errResp.error {
-            let hint = errResp.error == "Not Found"
-                ? "\n\nMake sure Device Flow is enabled for your OAuth App at github.com/settings/developers."
-                : ""
-            throw APIError.graphQLError(errMsg + hint)
-        }
-
-        // 3. Fall back to form-encoded response
-        let str = String(data: data, encoding: .utf8) ?? ""
-        let params = parseFormEncoded(str)
-
-        if let err = params["error"] {
-            let desc = (params["error_description"] ?? err)
-                .replacingOccurrences(of: "+", with: " ")
-            throw APIError.graphQLError(desc)
-        }
-
-        guard let deviceCode = params["device_code"],
-              let userCode = params["user_code"],
-              let uriStr = params["verification_uri"],
-              let uri = URL(string: uriStr) else {
-            let http = (response as? HTTPURLResponse)?.statusCode ?? 0
-            throw APIError.graphQLError(
-                "GitHub returned an unexpected response (HTTP \(http)).\n" +
-                "Tip: Make sure Device Flow is enabled on your OAuth App, " +
-                "or switch to Personal Access Token mode."
-            )
-        }
-
-        return DeviceCodeResponse(
-            deviceCode: deviceCode, userCode: userCode,
-            verificationURI: uri,
-            interval: Int(params["interval"] ?? "5") ?? 5,
-            expiresIn: Int(params["expires_in"] ?? "900") ?? 900
-        )
+        throw APIError.deviceFlowError("Invalid response from device code endpoint")
     }
 
     func pollForToken(clientID: String, deviceCode: String) async throws -> String {

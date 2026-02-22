@@ -105,13 +105,22 @@ final class DataStore {
 
     // MARK: - Data merge (called by PollingEngine)
     @discardableResult
-    func merge(newPRs: [PullRequest], newCIRuns: [CIRun], viewerLogin: String) -> DataDiff {
+    func merge(newPRs: [PullRequest], newCIRuns: [CIRun], viewerLogin: String) async -> DataDiff {
         self.viewerLogin = viewerLogin
-        let diff = computeDiff(
-            oldPRs: pullRequests, newPRs: newPRs,
-            oldCI: ciRuns, newCI: newCIRuns,
-            viewerLogin: viewerLogin
-        )
+        
+        let oldPRs = pullRequests
+        let oldCI = ciRuns
+        let startup = startupDate
+        
+        let diff = await Task.detached(priority: .userInitiated) {
+            return Self.computeDiff(
+                oldPRs: oldPRs, newPRs: newPRs,
+                oldCI: oldCI, newCI: newCIRuns,
+                viewerLogin: viewerLogin,
+                startupDate: startup
+            )
+        }.value
+        
         pullRequests = newPRs
         ciRuns = newCIRuns
         reviewRequests = newPRs.filter { $0.requestedReviewerLogins.contains(viewerLogin) }
@@ -125,10 +134,11 @@ final class DataStore {
     }
 
     // MARK: - Private diff computation
-    private func computeDiff(
+    nonisolated private static func computeDiff(
         oldPRs: [PullRequest], newPRs: [PullRequest],
         oldCI: [CIRun], newCI: [CIRun],
-        viewerLogin: String
+        viewerLogin: String,
+        startupDate: Date
     ) -> DataDiff {
         let oldPRMap = Dictionary(uniqueKeysWithValues: oldPRs.map { ($0.id, $0) })
         let oldCIMap = Dictionary(uniqueKeysWithValues: oldCI.map { ($0.repoFullName, $0) })
@@ -231,7 +241,7 @@ final class DataStore {
         )
     }
 
-    private func makeCommentPayload(pr: PullRequest, id: String, body: String, author: PRAuthor) -> CommentNotificationPayload {
+    nonisolated private static func makeCommentPayload(pr: PullRequest, id: String, body: String, author: PRAuthor) -> CommentNotificationPayload {
         let lowercaseBody = body.lowercased()
         let lowercaseLogin = author.login.lowercased()
         
@@ -262,6 +272,22 @@ final class DataStore {
     }
 
     // MARK: - Persistence
+    func clearAllData() {
+        monitoredRepositories = []
+        pullRequests = []
+        ciRuns = []
+        reviewRequests = []
+        connectedAccount = nil
+        viewerLogin = ""
+        lastSeenCommentAt = [:]
+        
+        persistence.save(repos: [])
+        persistence.save(lastSeenCommentAt: [:])
+        persistence.save(accountLogin: nil)
+        
+        NotificationCenter.default.post(name: .dataStoreUpdated, object: nil)
+    }
+
     private func loadPersistedData() {
         monitoredRepositories = persistence.loadRepos()
         lastSeenCommentAt = persistence.loadLastSeenCommentAt()

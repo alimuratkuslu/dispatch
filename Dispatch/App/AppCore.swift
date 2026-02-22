@@ -126,29 +126,30 @@ final class AppCore {
 // MARK: - Status Bar Controller
 
 @MainActor
-final class StatusBarController {
+final class StatusBarController: NSObject, NSPopoverDelegate {
     private var statusBarItem: NSStatusItem
     private var popover: NSPopover
-    private var core: AppCore
+    private weak var core: AppCore?
     private var eventMonitor: Any?
     
     init(core: AppCore) {
         self.core = core
+        self.popover = NSPopover()
+        self.statusBarItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        super.init()
         
-        let popover = NSPopover()
         popover.contentSize = NSSize(width: 360, height: 520)
         popover.behavior = .transient
+        popover.delegate = self
+        
         let root = PopoverView(
-            onOpenDetail: { pr in core.openDetailPanel(for: pr) },
-            onOpenPreferences: { core.openPreferences() },
-            onClosePopover: { [weak popover] in popover?.performClose(nil) },
-            onRefresh: { core.pollingEngine.triggerImmediatePoll() }
+            onOpenDetail: { [weak core] pr in core?.openDetailPanel(for: pr) },
+            onOpenPreferences: { [weak core] in core?.openPreferences() },
+            onClosePopover: { [weak self] in self?.popover.performClose(nil) },
+            onRefresh: { [weak core] in core?.pollingEngine.triggerImmediatePoll() }
         ).environment(core.dataStore)
         
         popover.contentViewController = NSHostingController(rootView: root)
-        self.popover = popover
-        
-        self.statusBarItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         
         if let button = statusBarItem.button {
             button.action = #selector(handleAction)
@@ -163,7 +164,7 @@ final class StatusBarController {
     }
     
     private func updateIcon() {
-        guard let button = statusBarItem.button else { return }
+        guard let button = statusBarItem.button, let core = core else { return }
         
         let state = core.dataStore.overallState
         let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
@@ -220,6 +221,12 @@ final class StatusBarController {
         popover.performClose(sender)
         stopMonitoring()
     }
+    
+    nonisolated func popoverDidClose(_ notification: Notification) {
+        Task { @MainActor in
+            self.stopMonitoring()
+        }
+    }
 
     private func startMonitoring() {
         eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
@@ -247,6 +254,6 @@ final class StatusBarController {
     }
     
     @objc private func openPrefs() {
-        core.openPreferences()
+        core?.openPreferences()
     }
 }

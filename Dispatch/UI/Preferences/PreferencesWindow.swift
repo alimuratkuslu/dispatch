@@ -319,8 +319,7 @@ struct AccountsTab: View {
         let keychain = KeychainService()
         try? await keychain.delete(account: "github")
         await MainActor.run {
-            dataStore.connectedAccount = nil
-            dataStore.viewerLogin = ""
+            dataStore.clearAllData()
             UserDefaults.standard.removeObject(forKey: "connectedAccountLogin")
         }
     }

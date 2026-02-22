@@ -13,6 +13,7 @@ enum APIError: LocalizedError {
     case deviceFlowSlowDown
     case deviceFlowExpired
     case deviceFlowAccessDenied
+    case deviceFlowError(String)
 
     var errorDescription: String? {
         switch self {
@@ -24,6 +25,7 @@ enum APIError: LocalizedError {
         case .decodingError(let e): return "Data parsing error: \(e.localizedDescription)"
         case .networkError(let e): return "Network error: \(e.localizedDescription)"
         case .graphQLError(let msg): return "GitHub API error: \(msg)"
+        case .deviceFlowError(let msg): return "Device flow error: \(msg)"
         default: return nil
         }
     }
@@ -39,6 +41,12 @@ enum APIError: LocalizedError {
             }
             return .unauthorized
         case 404: return .notFound
+        case 429:
+            if let reset = headers["X-RateLimit-Reset"] as? String,
+               let ts = TimeInterval(reset) {
+                return .rateLimitExceeded(resetDate: Date(timeIntervalSince1970: ts))
+            }
+            return .rateLimitExceeded(resetDate: Date().addingTimeInterval(60))
         case 500...599: return .serverError(statusCode)
         default: return .serverError(statusCode)
         }

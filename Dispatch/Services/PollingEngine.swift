@@ -9,6 +9,7 @@ final class PollingEngine {
     private var rateLimitResetDate: Date? = nil
     private var networkMonitor: NWPathMonitor?
     private var isPollInFlight = false
+    private let stateLock = NSLock()
 
     var pollInterval: TimeInterval {
         didSet { rescheduleTimer() }
@@ -109,14 +110,28 @@ final class PollingEngine {
     func pollIfReady() async {
         guard isNetworkAvailable else { return }
         guard await !dataStore.monitoredRepositories.isEmpty else { return }
-        if let reset = rateLimitResetDate, Date() < reset { return }
-        guard !isPollInFlight else { return }
+        
+        stateLock.lock()
+        if let reset = rateLimitResetDate, Date() < reset {
+            stateLock.unlock()
+            return 
+        }
+        guard !isPollInFlight else { 
+            stateLock.unlock()
+            return 
+        }
+        isPollInFlight = true
+        stateLock.unlock()
+        
         await poll()
     }
 
     private func poll() async {
-        isPollInFlight = true
-        defer { isPollInFlight = false }
+        defer { 
+            stateLock.lock()
+            isPollInFlight = false 
+            stateLock.unlock()
+        }
 
         let repos = await dataStore.monitoredRepositories.filter { !$0.isPaused }
         guard !repos.isEmpty else { return }
@@ -137,25 +152,41 @@ final class PollingEngine {
             }
 
             // Merge into DataStore; get raw diff (mergedPRs includes both merged+closed)
-            let rawDiff = await MainActor.run {
-                dataStore.merge(newPRs: allPRs, newCIRuns: allCIRuns, viewerLogin: latestViewerLogin)
-            }
+            let rawDiff = await dataStore.merge(newPRs: allPRs, newCIRuns: allCIRuns, viewerLogin: latestViewerLogin)
 
-            if backoffMultiplier > 1 {
+            stateLock.lock()
+            let currentMultiplier = backoffMultiplier
+            if currentMultiplier > 1 {
                 backoffMultiplier = 1.0
+                stateLock.unlock()
                 rescheduleTimer()
+            } else {
+                stateLock.unlock()
             }
 
             // Split "disappeared" PRs into truly merged vs just closed via REST check
             var verifiedMerged: [PullRequest] = []
             var verifiedClosed: [PullRequest] = []
-            for pr in rawDiff.mergedPRs {
-                let parts = pr.repoFullName.split(separator: "/")
-                guard parts.count == 2 else { verifiedMerged.append(pr); continue }
-                let isMerged = (try? await apiClient.checkIsPRMerged(
-                    owner: String(parts[0]), repo: String(parts[1]), number: pr.number
-                )) ?? true
-                if isMerged { verifiedMerged.append(pr) } else { verifiedClosed.append(pr) }
+            
+            await withTaskGroup(of: (PullRequest, Bool).self) { group in
+                for pr in rawDiff.mergedPRs {
+                    let parts = pr.repoFullName.split(separator: "/")
+                    guard parts.count == 2 else { 
+                        group.addTask { return (pr, true) }
+                        continue 
+                    }
+                    let client = self.apiClient
+                    group.addTask {
+                        let isMerged = (try? await client.checkIsPRMerged(
+                            owner: String(parts[0]), repo: String(parts[1]), number: pr.number
+                        )) ?? true
+                        return (pr, isMerged)
+                    }
+                }
+                
+                for await (pr, isMerged) in group {
+                    if isMerged { verifiedMerged.append(pr) } else { verifiedClosed.append(pr) }
+                }
             }
 
             let finalDiff = DataDiff(
@@ -177,13 +208,21 @@ final class PollingEngine {
         } catch APIError.unauthorized {
             await MainActor.run { dataStore.tokenExpired = true }
         } catch APIError.rateLimitExceeded(let reset) {
+            stateLock.lock()
             rateLimitResetDate = reset
+            stateLock.unlock()
         } catch APIError.networkError {
             await MainActor.run { dataStore.isOffline = true }
         } catch {
+            stateLock.lock()
             let newMultiplier = min(backoffMultiplier * 2, 8.0)
-            if newMultiplier != backoffMultiplier {
+            let changed = (newMultiplier != backoffMultiplier)
+            if changed {
                 backoffMultiplier = newMultiplier
+            }
+            stateLock.unlock()
+            
+            if changed {
                 rescheduleTimer()
             }
         }
