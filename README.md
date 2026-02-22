@@ -46,7 +46,7 @@ brew install --cask dispatch
 
 1. Clone the repository: `git clone https://github.com/alimuratkuslu/dispatch.git`
 2. Configure Secrets: 
-   - Copy `Dispatch/App/Secrets.swift.example` to `Dispatch/App/Secrets.swift`.
+   - y `Dispatch/App/Secrets.swift.example` to `Dispatch/App/Secrets.swift`.
    - Enter your [GitHub OAuth Client ID](https://github.com/settings/developers).
 3. Open `Dispatch.xcodeproj` in Xcode.
 4. Build & Run!

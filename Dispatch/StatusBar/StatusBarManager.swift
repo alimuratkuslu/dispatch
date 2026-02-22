@@ -5,7 +5,6 @@ import SwiftUI
 final class StatusBarManager: NSObject, NSWindowDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
-    private var detailPanel: PRDetailPanel?
     private var observationTask: Task<Void, Never>?
 
     // Dependencies
@@ -48,9 +47,6 @@ final class StatusBarManager: NSObject, NSWindowDelegate {
         popover.contentSize = NSSize(width: 360, height: 440)
 
         let popoverView = PopoverView(
-            onOpenDetail: { [weak self] pr in
-                self?.openDetailPanel(for: pr)
-            },
             onOpenPreferences: { [weak self] in
                 self?.openPreferences()
             },
@@ -119,37 +115,19 @@ final class StatusBarManager: NSObject, NSWindowDelegate {
 
     func openDetailPanel(for pr: PullRequest) {
         // Find the latest version of the PR from DataStore
-        let currentPR = dataStore.pullRequests.first(where: { $0.id == pr.id }) ?? pr
+        let _ = dataStore.pullRequests.first(where: { $0.id == pr.id }) ?? pr
 
-        // Close existing panel if showing a different PR
-        if let existing = detailPanel, existing.isVisible {
-            let existingTitle = existing.title
-            let newTitle = "#\(currentPR.number) \(currentPR.title)"
-            if existingTitle == newTitle {
-                // Same PR — bring to front
-                existing.makeKeyAndOrderFront(nil)
-                return
-            }
-            existing.orderOut(nil)
-        }
+        // Since we moved to popover navigation, we no longer use a separate panel.
+        // If we want to support opening the popover to a specific PR (e.g. from notification),
+        // we should trigger that state in PopoverView.
+        // For now, we just ensure the popover is shown.
+        showPopover()
+    }
 
+    private func showPopover() {
         guard let button = statusItem.button else { return }
-        let buttonFrame = button.window?.convertToScreen(button.frame) ?? .zero
-        let screen = button.window?.screen
-
-        if detailPanel == nil {
-            detailPanel = PRDetailPanel()
-            detailPanel?.delegate = self
-        }
-
-        detailPanel?.show(pr: currentPR, dataStore: dataStore, onRefresh: { [weak self] in
-            self?.pollingEngine.triggerImmediatePoll()
-        }, near: buttonFrame, in: screen)
-
-        // Switch popover to applicationDefined so it stays open while panel is visible
         buildPopoverIfNeeded()
-        popover.behavior = .applicationDefined
-        if !popover.isShown, let button = statusItem.button {
+        if !popover.isShown {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         }
     }

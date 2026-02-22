@@ -14,7 +14,7 @@ final class AppCore {
     private var preferencesWindowController: PreferencesWindow?
     private var onboardingCoordinator: OnboardingCoordinator?
     private var statusBarController: StatusBarController?
-    nonisolated(unsafe) private var observers: [NSObjectProtocol] = []
+    nonisolated private var observers: [NSObjectProtocol] = []
 
     init() {
         dataStore = DataStore()
@@ -64,14 +64,17 @@ final class AppCore {
         let openDetailToken = NotificationCenter.default.addObserver(
             forName: .openPRDetail, object: nil, queue: .main
         ) { [weak self] note in
-            guard let self, let id = note.object as? String,
-                  let pr = self.dataStore.pullRequests.first(where: { $0.id == id }) else { return }
-            self.statusBarController?.showPopover()
+            guard let id = note.object as? String else { return }
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                let _ = self.dataStore.pullRequests.first(where: { $0.id == id })
+                self.statusBarController?.showPopover()
+            }
         }
 
         let prefsToken = NotificationCenter.default.addObserver(
             forName: .showPreferences, object: nil, queue: .main
-        ) { [weak self] _ in self?.openPreferences() }
+        ) { [weak self] _ in Task { @MainActor [weak self] in self?.openPreferences() } }
 
         observers = [openDetailToken, prefsToken]
 
@@ -148,7 +151,7 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         }
         
         NotificationCenter.default.addObserver(forName: .dataStoreUpdated, object: nil, queue: .main) { [weak self] _ in
-            self?.updateIcon()
+            Task { @MainActor [weak self] in self?.updateIcon() }
         }
     }
 

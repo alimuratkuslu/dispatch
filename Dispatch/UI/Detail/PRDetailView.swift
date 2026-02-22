@@ -3,6 +3,7 @@ import SwiftUI
 struct PRDetailView: View {
     let pr: PullRequest
     var onRefresh: () -> Void = {}
+    var onBack: (() -> Void)? = nil
 
     @Environment(DataStore.self) private var dataStore
     @State private var showResolved: Bool = false
@@ -56,6 +57,16 @@ struct PRDetailView: View {
 
     private var navigationBar: some View {
         HStack(spacing: 8) {
+            if let onBack = onBack {
+                Button(action: onBack) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .padding(.trailing, 4)
+            }
+            
             VStack(alignment: .leading, spacing: 1) {
                 Text(pr.repoFullName)
                     .font(.system(size: 10))
@@ -86,9 +97,7 @@ struct PRDetailView: View {
                         let parts = pr.repoFullName.split(separator: "/")
                         guard parts.count == 2 else { return }
                         do {
-                            // Post a comment mentioning @copilot to trigger a review.
-                            // This works broadly — Copilot responds to @mentions in PR comments.
-                            try await dataStore.apiClient.postCopilotReviewComment(
+                            try await dataStore.apiClient.requestCopilotReview(
                                 owner: String(parts[0]),
                                 repo: String(parts[1]),
                                 number: pr.number

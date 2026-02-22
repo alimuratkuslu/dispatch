@@ -337,10 +337,9 @@ actor GitHubAPIClient {
         }
         
         // Print the raw response string to see what went wrong
-        let rawResponse = String(data: data, encoding: .utf8) ?? "(no body)"
-        print("Device flow failed. Raw response: \\(rawResponse)")
+        let _ = String(data: data, encoding: .utf8) ?? "(no body)"
 
-        throw APIError.deviceFlowError("Invalid response from device code endpoint. \\(rawResponse)")
+        throw APIError.deviceFlowError("Invalid response from device code endpoint.")
     }
 
     func pollForToken(clientID: String, deviceCode: String) async throws -> String {

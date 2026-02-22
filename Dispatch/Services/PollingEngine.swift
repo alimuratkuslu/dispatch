@@ -4,12 +4,41 @@ import Network
 final class PollingEngine {
     private var timer: DispatchSourceTimer?
     private let queue = DispatchQueue(label: "com.dispatch.polling", qos: .utility)
-    private var backoffMultiplier: Double = 1.0
     private var isNetworkAvailable = true
-    private var rateLimitResetDate: Date? = nil
     private var networkMonitor: NWPathMonitor?
-    private var isPollInFlight = false
-    private let stateLock = NSLock()
+
+    private actor PollingState {
+        var isPollInFlight = false
+        var rateLimitResetDate: Date? = nil
+        var backoffMultiplier: Double = 1.0
+        
+        func tryBeginPoll() -> Bool {
+            if let reset = rateLimitResetDate, Date() < reset { return false }
+            if isPollInFlight { return false }
+            isPollInFlight = true
+            return true
+        }
+        func endPoll() { isPollInFlight = false }
+        func setRateLimit(_ date: Date) { rateLimitResetDate = date }
+        
+        func getBackoff() -> Double { return backoffMultiplier }
+        func resetBackoff() -> Bool {
+            if backoffMultiplier > 1 {
+                backoffMultiplier = 1.0
+                return true
+            }
+            return false
+        }
+        func increaseBackoff() -> Bool {
+            let newMultiplier = min(backoffMultiplier * 2, 8.0)
+            if newMultiplier != backoffMultiplier {
+                backoffMultiplier = newMultiplier
+                return true
+            }
+            return false
+        }
+    }
+    private let state = PollingState()
 
     var pollInterval: TimeInterval {
         didSet { rescheduleTimer() }
@@ -24,7 +53,8 @@ final class PollingEngine {
         self.apiClient = apiClient
         self.dataStore = dataStore
         self.notificationManager = notificationManager
-        self.persistence = dataStore.persistence
+        let persistence = UserDefaultsStore()
+        self.persistence = persistence
         self.pollInterval = persistence.pollInterval
     }
 
@@ -71,9 +101,12 @@ final class PollingEngine {
     private func scheduleTimer() {
         timer?.cancel()
         let t = DispatchSource.makeTimerSource(queue: queue)
-        t.schedule(deadline: .now(), repeating: pollInterval * backoffMultiplier, leeway: .seconds(5))
-        t.setEventHandler { [weak self] in Task { await self?.pollIfReady() } }
-        t.resume()
+        Task {
+            let mult = await state.getBackoff()
+            t.schedule(deadline: .now(), repeating: pollInterval * mult, leeway: .seconds(5))
+            t.setEventHandler { [weak self] in Task { await self?.pollIfReady() } }
+            t.resume()
+        }
         timer = t
     }
 
@@ -111,26 +144,15 @@ final class PollingEngine {
         guard isNetworkAvailable else { return }
         guard await !dataStore.monitoredRepositories.isEmpty else { return }
         
-        stateLock.lock()
-        if let reset = rateLimitResetDate, Date() < reset {
-            stateLock.unlock()
-            return 
-        }
-        guard !isPollInFlight else { 
-            stateLock.unlock()
-            return 
-        }
-        isPollInFlight = true
-        stateLock.unlock()
+        let canPoll = await state.tryBeginPoll()
+        guard canPoll else { return }
         
         await poll()
     }
 
     private func poll() async {
         defer { 
-            stateLock.lock()
-            isPollInFlight = false 
-            stateLock.unlock()
+            Task { await state.endPoll() }
         }
 
         let repos = await dataStore.monitoredRepositories.filter { !$0.isPaused }
@@ -154,14 +176,9 @@ final class PollingEngine {
             // Merge into DataStore; get raw diff (mergedPRs includes both merged+closed)
             let rawDiff = await dataStore.merge(newPRs: allPRs, newCIRuns: allCIRuns, viewerLogin: latestViewerLogin)
 
-            stateLock.lock()
-            let currentMultiplier = backoffMultiplier
-            if currentMultiplier > 1 {
-                backoffMultiplier = 1.0
-                stateLock.unlock()
+            let decreased = await state.resetBackoff()
+            if decreased {
                 rescheduleTimer()
-            } else {
-                stateLock.unlock()
             }
 
             // Split "disappeared" PRs into truly merged vs just closed via REST check
@@ -208,21 +225,12 @@ final class PollingEngine {
         } catch APIError.unauthorized {
             await MainActor.run { dataStore.tokenExpired = true }
         } catch APIError.rateLimitExceeded(let reset) {
-            stateLock.lock()
-            rateLimitResetDate = reset
-            stateLock.unlock()
+            await state.setRateLimit(reset)
         } catch APIError.networkError {
             await MainActor.run { dataStore.isOffline = true }
         } catch {
-            stateLock.lock()
-            let newMultiplier = min(backoffMultiplier * 2, 8.0)
-            let changed = (newMultiplier != backoffMultiplier)
-            if changed {
-                backoffMultiplier = newMultiplier
-            }
-            stateLock.unlock()
-            
-            if changed {
+            let increased = await state.increaseBackoff()
+            if increased {
                 rescheduleTimer()
             }
         }
