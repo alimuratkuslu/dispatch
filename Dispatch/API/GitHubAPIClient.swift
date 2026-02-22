@@ -194,16 +194,48 @@ final class GitHubAPIClient {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         authHeaders(token: tok).forEach { request.setValue($1, forHTTPHeaderField: $0) }
-        
-        let body: [String: [String]] = ["reviewers": ["github-copilot"]]
+
+        // "copilot" is the correct reviewer login for GitHub Copilot Code Review.
+        // Requires Copilot for Business/Enterprise with code review enabled at org level.
+        let body: [String: [String]] = ["reviewers": ["copilot"]]
         request.httpBody = try JSONEncoder().encode(body)
 
         let (data, response) = try await session.data(for: request)
         if let http = response as? HTTPURLResponse {
             print("[Copilot Review] HTTP \(http.statusCode)")
+            if http.statusCode == 422 {
+                let raw = String(data: data, encoding: .utf8) ?? "(no body)"
+                print("[Copilot Review] 422 - Copilot review may not be enabled for this repo/org. Body: \(raw)")
+            } else if http.statusCode != 201 {
+                let raw = String(data: data, encoding: .utf8) ?? "(no body)"
+                print("[Copilot Review] Unexpected response: \(raw)")
+            }
+        }
+        try validateResponse(response, data: data)
+    }
+
+    /// Posts a PR comment mentioning @copilot which triggers the Copilot coding
+    /// agent to review the PR. This works on any repo with the Copilot agent available,
+    /// even without Copilot for Business. The review appears as comments on the PR.
+    func postCopilotReviewComment(owner: String, repo: String, number: Int) async throws {
+        let tok = try await token()
+        // PRs use the issues comment endpoint (PRs are a superset of issues on GitHub)
+        let url = URL(string: "\(restBase)/repos/\(owner)/\(repo)/issues/\(number)/comments")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        authHeaders(token: tok).forEach { request.setValue($1, forHTTPHeaderField: $0) }
+
+        let commentBody = "@copilot please review this pull request. Analyze the code changes, point out any potential bugs, security issues, or improvements, and provide a summary of the changes."
+        let body: [String: String] = ["body": commentBody]
+        request.httpBody = try JSONEncoder().encode(body)
+
+        let (data, response) = try await session.data(for: request)
+        if let http = response as? HTTPURLResponse {
+            print("[Copilot Comment] HTTP \(http.statusCode)")
             if http.statusCode != 201 {
                 let raw = String(data: data, encoding: .utf8) ?? "(no body)"
-                print("[Copilot Review] Error body: \(raw)")
+                print("[Copilot Comment] Error: \(raw)")
             }
         }
         try validateResponse(response, data: data)

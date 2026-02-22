@@ -9,41 +9,59 @@ jobs:
   build:
     name: Build & Release
     runs-on: macos-latest
-    
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        
-      - name: Install dependencies
+
+      - name: Generate Secrets.swift
+        # Secrets.swift is gitignored. We generate it at build time from
+        # a GitHub Actions secret. Go to your repo → Settings → Secrets → Actions
+        # and add a secret named GITHUB_CLIENT_ID with your OAuth App client ID.
         run: |
-          # If you use CocoaPods: pod install
-          # If you use SPM, xcodebuild handles it
-          
+          cat > Dispatch/App/Secrets.swift << 'EOF'
+          import Foundation
+          enum Secrets {
+              static let githubClientID = "${{ secrets.GITHUB_CLIENT_ID }}"
+          }
+          EOF
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
       - name: Build App
         run: |
-          xcodebuild -scheme Dispatch -configuration Release -sdk macosx build CODE_SIGNING_ALLOWED=NO
-          
+          xcodebuild \
+            -scheme Dispatch \
+            -configuration Release \
+            -sdk macosx \
+            -derivedDataPath DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
       - name: Create Archive
         run: |
           mkdir -p build
-          cp -R "/Users/runner/Library/Developer/Xcode/DerivedData/$(ls /Users/runner/Library/Developer/Xcode/DerivedData | grep Dispatch-)/Build/Products/Release/Dispatch.app" build/
+          APP_PATH=$(find DerivedData -name "Dispatch.app" -type d | head -1)
+          echo "Found app at: $APP_PATH"
+          cp -R "$APP_PATH" build/
           cd build
           zip -r Dispatch.zip Dispatch.app
-          
+
       - name: Create Release
-        id: create_release
         uses: softprops/action-gh-release@v2
         with:
           files: build/Dispatch.zip
           draft: false
           prerelease: false
           body: |
-            ## New Release: ${{ github.ref_name }}
-            
-            Dispatch is updated with new features and improvements.
-            
+            ## ${{ github.ref_name }}
+
+            Dispatch is a native macOS menu bar app to monitor GitHub pull requests.
+
             ### Installation
             1. Download `Dispatch.zip`
-            2. Extract and move `Dispatch.app` to your Applications folder.
+            2. Extract and move `Dispatch.app` to your Applications folder
+            3. Launch and connect your GitHub account through the setup flow
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

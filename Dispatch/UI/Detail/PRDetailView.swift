@@ -76,13 +76,19 @@ struct PRDetailView: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.mini)
                 .tint(.green)
-            } else if pr.author.login == dataStore.viewerLogin && !currentPR.hasCopilotReview && !currentPR.isCopilotRequested {
+            } else if pr.author.login == dataStore.viewerLogin && !currentPR.hasCopilotReview {
                 Button(action: {
                     Task {
                         let parts = pr.repoFullName.split(separator: "/")
                         guard parts.count == 2 else { return }
                         do {
-                            try await dataStore.apiClient.requestCopilotReview(owner: String(parts[0]), repo: String(parts[1]), number: pr.number)
+                            // Post a comment mentioning @copilot to trigger a review.
+                            // This works broadly — Copilot responds to @mentions in PR comments.
+                            try await dataStore.apiClient.postCopilotReviewComment(
+                                owner: String(parts[0]),
+                                repo: String(parts[1]),
+                                number: pr.number
+                            )
                             onRefresh()
                         } catch {
                             print("[AI Review] Failed: \(error.localizedDescription)")
@@ -92,8 +98,9 @@ struct PRDetailView: View {
                     Label("AI Review", systemImage: "sparkles")
                         .font(.system(size: 11, weight: .semibold))
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.borderedProminent)
                 .controlSize(.mini)
+                .tint(.purple)
             }
 
             if dataStore.isLoading {
