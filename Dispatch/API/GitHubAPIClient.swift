@@ -194,27 +194,22 @@ actor GitHubAPIClient {
 
     func requestCopilotReview(owner: String, repo: String, number: Int) async throws {
         let tok = try await token()
-        // Mimic the GitHub Web UI request to trigger copilot-workspace/code-review directly
-        let url = URL(string: "https://github.com/\(owner)/\(repo)/pull/\(number)/review-requests")!
+        let url = URL(string: "\(restBase)/repos/\(owner)/\(repo)/pulls/\(number)/requested_reviewers")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        // Use the PAT as auth to see if the web endpoint accepts it
         authHeaders(token: tok).forEach { request.setValue($1, forHTTPHeaderField: $0) }
 
-        // Send an empty body or the specific reviewer structure if required.
-        // We observe that sending an empty JSON object `{}` or nothing typically triggers the internal flow
-        // when hitting the explicit `review-requests` web endpoint, assuming session/PAT grants access.
-        let body: [String: String] = [:]
+        let body: [String: [String]] = ["reviewers": ["copilot"]]
         request.httpBody = try JSONEncoder().encode(body)
 
         let (data, response) = try await session.data(for: request)
         if let http = response as? HTTPURLResponse {
-            print("[Copilot Web Trigger] HTTP \(http.statusCode)")
-            if http.statusCode != 200 && http.statusCode != 201 {
+            print("[Copilot Review] HTTP \(http.statusCode)")
+            if http.statusCode != 201 {
                 let raw = String(data: data, encoding: .utf8) ?? "(no body)"
-                print("[Copilot Web Trigger] Unexpected response: \(raw)")
+                print("[Copilot Review] Unexpected response: \(raw)")
             }
         }
     }
@@ -243,10 +238,6 @@ actor GitHubAPIClient {
         try validateResponse(response, data: data)
     }
 
-    func postCopilotReviewComment(owner: String, repo: String, number: Int) async throws {
-        let body = "@copilot please review this pull request. Analyze the code changes, point out any potential bugs, security issues, or improvements, and provide a summary of the changes."
-        try await postComment(owner: owner, repo: repo, number: number, body: body)
-    }
 
     func submitThreadReply(threadID: String, body: String) async throws {
         let tok = try await token()

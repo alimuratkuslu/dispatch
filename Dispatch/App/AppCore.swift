@@ -11,7 +11,8 @@ final class AppCore {
     let pollingEngine: PollingEngine
     let notificationManager = NotificationManager()
 
-    private var preferencesWindowController: PreferencesWindow?
+// MARK: - AppCore
+
     private var onboardingCoordinator: OnboardingCoordinator?
     private var statusBarController: StatusBarController?
     private let observerStorage = ObserverStorage()
@@ -94,14 +95,8 @@ final class AppCore {
     // MARK: - Preferences
 
     func openPreferences() {
-        if preferencesWindowController == nil {
-            preferencesWindowController = PreferencesWindow(
-                dataStore: dataStore,
-                pollingEngine: pollingEngine,
-                notificationManager: notificationManager
-            )
-        }
-        preferencesWindowController?.show()
+        statusBarController?.showPopover()
+        NotificationCenter.default.post(name: .showPreferences, object: nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -130,18 +125,19 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         self.statusBarItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
         
-        popover.contentSize = NSSize(width: 360, height: 520)
+        popover.contentSize = NSSize(width: 360, height: 500)
         popover.behavior = .transient
         popover.delegate = self
         
         let root = PopoverView(
-            onOpenPreferences: { [weak core] in core?.openPreferences() },
+            pollingEngine: core.pollingEngine,
+            notificationManager: core.notificationManager,
             onClosePopover: { [weak self] in self?.popover.performClose(nil) },
             onRefresh: { [weak core] in core?.pollingEngine.triggerImmediatePoll() },
-            onDetailToggled: { [weak self] isDetail in
+            onSizeChanged: { [weak self] size in
                 guard let self = self else { return }
                 self.popover.animates = true
-                self.popover.contentSize = isDetail ? NSSize(width: 480, height: 720) : NSSize(width: 360, height: 520)
+                self.popover.contentSize = size
             }
         ).environment(core.dataStore)
         

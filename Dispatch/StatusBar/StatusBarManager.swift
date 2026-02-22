@@ -47,14 +47,18 @@ final class StatusBarManager: NSObject, NSWindowDelegate {
         popover.contentSize = NSSize(width: 360, height: 440)
 
         let popoverView = PopoverView(
-            onOpenPreferences: { [weak self] in
-                self?.openPreferences()
-            },
+            pollingEngine: pollingEngine,
+            notificationManager: notificationManager,
             onClosePopover: { [weak self] in
                 self?.popover.performClose(nil)
             },
             onRefresh: { [weak self] in
                 self?.pollingEngine.triggerImmediatePoll()
+            },
+            onSizeChanged: { [weak self] size in
+                guard let self = self else { return }
+                self.popover.animates = true
+                self.popover.contentSize = size
             }
         )
         .environment(dataStore)
@@ -153,18 +157,9 @@ final class StatusBarManager: NSObject, NSWindowDelegate {
 
     // MARK: - Preferences
 
-    private var preferencesWindow: PreferencesWindow?
-
     func openPreferences() {
-        popover?.performClose(nil)
-        if preferencesWindow == nil {
-            preferencesWindow = PreferencesWindow(
-                dataStore: dataStore,
-                pollingEngine: pollingEngine,
-                notificationManager: notificationManager
-            )
-        }
-        preferencesWindow?.show()
+        showPopover()
+        NotificationCenter.default.post(name: .showPreferences, object: nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 

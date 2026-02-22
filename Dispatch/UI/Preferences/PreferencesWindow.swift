@@ -2,47 +2,6 @@ import AppKit
 import SwiftUI
 import ServiceManagement
 
-// MARK: - PreferencesWindow
-
-final class PreferencesWindow: NSObject, NSWindowDelegate {
-    private var window: NSWindow?
-    private let dataStore: DataStore
-    private let pollingEngine: PollingEngine
-    private let notificationManager: NotificationManager
-
-    init(dataStore: DataStore, pollingEngine: PollingEngine, notificationManager: NotificationManager) {
-        self.dataStore = dataStore
-        self.pollingEngine = pollingEngine
-        self.notificationManager = notificationManager
-    }
-
-    func show() {
-        if window == nil {
-            let prefView = PreferencesView(
-                dataStore: dataStore,
-                pollingEngine: pollingEngine,
-                notificationManager: notificationManager
-            )
-            let controller = NSHostingController(rootView: prefView)
-            let win = NSWindow(contentViewController: controller)
-            win.title = "Dispatch Preferences"
-            win.styleMask = [.titled, .closable, .miniaturizable]
-            win.isReleasedWhenClosed = false
-            win.delegate = self
-            win.center()
-            win.setContentSize(NSSize(width: 520, height: 420))
-            window = win
-        }
-        window?.makeKeyAndOrderFront(nil)
-    }
-
-    func windowWillClose(_ notification: Notification) {
-        window = nil
-    }
-}
-
-// MARK: - PreferencesView
-
 enum PreferenceTab: String, CaseIterable, Identifiable {
     case general = "General"
     case notifications = "Notifications"
@@ -65,12 +24,29 @@ struct PreferencesView: View {
     let dataStore: DataStore
     let pollingEngine: PollingEngine
     let notificationManager: NotificationManager
+    var onBack: (() -> Void)? = nil
     
     @State private var selectedTab: PreferenceTab? = .general
 
     var body: some View {
-        NavigationSplitView {
-            List(selection: $selectedTab) {
+        VStack(spacing: 0) {
+            if let onBack = onBack {
+                HStack {
+                    Button(action: onBack) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(.secondary)
+                        Text("Back")
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    Spacer()
+                }
+                Divider().opacity(0.1)
+            }
+            NavigationSplitView {
+                List(selection: $selectedTab) {
                 ForEach(PreferenceTab.allCases) { tab in
                     NavigationLink(value: tab) {
                         Label(tab.rawValue, systemImage: tab.iconName)
@@ -99,6 +75,7 @@ struct PreferencesView: View {
                 }
             }
             .environment(dataStore)
+        }
         }
         .frame(minWidth: 600, minHeight: 450)
     }

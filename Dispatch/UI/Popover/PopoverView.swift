@@ -2,28 +2,49 @@ import SwiftUI
 
 struct PopoverView: View {
     @Environment(DataStore.self) private var dataStore
-    var onOpenPreferences: () -> Void = {}
+    let pollingEngine: PollingEngine
+    let notificationManager: NotificationManager
     var onClosePopover: () -> Void = {}
     var onRefresh: () -> Void = {}
-    var onDetailToggled: ((Bool) -> Void)? = nil
+    var onSizeChanged: ((NSSize) -> Void)? = nil
     
     @State private var selectedPR: PullRequest? = nil
+    @State private var showPreferences = false
 
     private let builder = CommentThreadBuilder()
 
     var body: some View {
         VStack(spacing: 0) {
-            if let pr = selectedPR {
+            if showPreferences {
+                PreferencesView(
+                    dataStore: dataStore,
+                    pollingEngine: pollingEngine,
+                    notificationManager: notificationManager,
+                    onBack: {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                            showPreferences = false
+                        }
+                    }
+                )
+            } else if let pr = selectedPR {
                 detailView(for: pr)
             } else {
                 listView
             }
         }
-        .frame(width: selectedPR == nil ? 360 : 480)
-        .frame(minHeight: 200, maxHeight: selectedPR == nil ? 600 : 720)
+        .frame(width: showPreferences ? 600 : (selectedPR == nil ? 360 : 480))
+        .frame(minHeight: 200, maxHeight: showPreferences ? 450 : (selectedPR == nil ? 500 : 580))
         .background(VisualEffectView(material: .popover, blendingMode: .behindWindow).ignoresSafeArea())
         .onChange(of: selectedPR != nil) { _, isDetail in
-            onDetailToggled?(isDetail)
+            if !showPreferences {
+                onSizeChanged?(isDetail ? NSSize(width: 480, height: 580) : NSSize(width: 360, height: 500))
+            }
+        }
+        .onChange(of: showPreferences) { _, isPref in
+            onSizeChanged?(isPref ? NSSize(width: 600, height: 450) : (selectedPR != nil ? NSSize(width: 480, height: 580) : NSSize(width: 360, height: 500)))
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showPreferences)) { _ in
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { showPreferences = true }
         }
     }
 
@@ -97,7 +118,9 @@ struct PopoverView: View {
                 .contentShape(Rectangle())
                 .opacity(dataStore.isLoading ? 1 : 0.6)
                 
-                Button(action: onOpenPreferences) {
+                Button(action: {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { showPreferences = true }
+                }) {
                     Image(systemName: "slider.horizontal.3")
                         .font(.system(size: 12, weight: .medium))
                 }
@@ -119,7 +142,7 @@ struct PopoverView: View {
                 icon: "exclamationmark.triangle.fill",
                 message: "GitHub token expired",
                 color: .red,
-                action: onOpenPreferences,
+                action: { withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { showPreferences = true } },
                 actionLabel: "Reconnect"
             )
         } else if dataStore.isOffline {
@@ -217,7 +240,9 @@ struct PopoverView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-            Button("Open Preferences") { onOpenPreferences() }
+            Button("Open Preferences") { 
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { showPreferences = true }
+            }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
         }
