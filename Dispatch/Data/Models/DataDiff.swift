@@ -5,6 +5,8 @@ struct CommentNotificationPayload {
     let id: String
     let body: String
     let author: PRAuthor
+    let isBotResponse: Bool
+    let isSuccess: Bool? // nil if neutral, true if success, false if failure
 }
 
 struct DataDiff {

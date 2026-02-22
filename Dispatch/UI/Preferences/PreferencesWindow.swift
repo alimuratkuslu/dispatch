@@ -171,7 +171,29 @@ struct NotificationsTab: View {
 
     var body: some View {
         Form {
-            Section {
+            Section("Status") {
+                HStack {
+                    Label("Permission", systemImage: notificationManager.permissionGranted ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                        .foregroundStyle(notificationManager.permissionGranted ? .green : .orange)
+                    Spacer()
+                    Text(notificationManager.permissionGranted ? "Granted" : "Not Granted")
+                        .foregroundStyle(.secondary)
+                }
+                
+                Button("Send Test Notification") {
+                    notificationManager.sendTestNotification()
+                    testSent = true
+                }
+                .disabled(!notificationManager.permissionGranted)
+                
+                if !notificationManager.permissionGranted {
+                    Text("Please enable notifications for Dispatch in System Settings > Notifications.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("General") {
                 Toggle("Enable Notifications", isOn: $masterEnabled)
                 if masterEnabled {
                     Toggle("Ignore my own actions", isOn: $ignoreSelfActions)

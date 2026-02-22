@@ -19,7 +19,6 @@ struct NotificationPreferences: Codable {
 final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     private var sentIDs: Set<String> = []
     private(set) var permissionGranted: Bool = false
-    var preferences: NotificationPreferences = NotificationPreferences()
 
     override init() {
         super.init()
@@ -34,7 +33,9 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
             let granted = try await UNUserNotificationCenter.current()
                 .requestAuthorization(options: [.alert, .sound, .badge])
             permissionGranted = granted
+            print("[NotificationManager] Permission granted: \(granted)")
         } catch {
+            print("[NotificationManager] Permission error: \(error)")
             permissionGranted = false
         }
     }
@@ -42,23 +43,37 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     func checkPermission() {
         Task {
             let settings = await UNUserNotificationCenter.current().notificationSettings()
-            permissionGranted = settings.authorizationStatus == .authorized
+            let granted = settings.authorizationStatus == .authorized
+            await MainActor.run {
+                self.permissionGranted = granted
+            }
         }
     }
 
     // MARK: - Notify from diff
     func notify(for diff: DataDiff) {
-        guard preferences.masterEnabled else { return }
-        if preferences.newPREnabled         { diff.newlyOpenedPRs.forEach { fire_N0($0) } }
-        if preferences.ciFailEnabled        { diff.newFailingCI.forEach { fire_N1($0) } }
-        if preferences.ciFixEnabled         { diff.fixedCI.forEach { fire_N2($0) } }
-        if preferences.reviewRequestEnabled { diff.newReviewRequests.forEach { fire_N3($0) } }
-        if preferences.approvalEnabled      { diff.newApprovals.forEach { fire_N4($0) } }
-        if preferences.changesRequestedEnabled { diff.newChangesRequested.forEach { fire_N5($0) } }
-        if preferences.mergeEnabled         { diff.mergedPRs.forEach { fire_N6($0) } }
-        if preferences.closedEnabled        { diff.closedPRs.forEach { fire_N6_closed($0) } }
-        if preferences.commentEnabled       { diff.newComments.forEach { fire_N7($0) } }
-        if preferences.copilotEnabled       { diff.newCopilotReviews.forEach { fire_N8($0) } }
+        let defaults = UserDefaults.standard
+        guard defaults.bool(forKey: "notif.enabled") else { return }
+        
+        if defaults.bool(forKey: "notif.newPREnabled")         { diff.newlyOpenedPRs.forEach { fire_N0($0) } }
+        if defaults.bool(forKey: "notif.ciFailEnabled")        { diff.newFailingCI.forEach { fire_N1($0) } }
+        if defaults.bool(forKey: "notif.ciFixEnabled")         { diff.fixedCI.forEach { fire_N2($0) } }
+        if defaults.bool(forKey: "notif.reviewReqEnabled") { diff.newReviewRequests.forEach { fire_N3($0) } }
+        if defaults.bool(forKey: "notif.approvalEnabled")      { diff.newApprovals.forEach { fire_N4($0) } }
+        if defaults.bool(forKey: "notif.changesEnabled") { diff.newChangesRequested.forEach { fire_N5($0) } }
+        if defaults.bool(forKey: "notif.mergeEnabled")         { diff.mergedPRs.forEach { fire_N6($0) } }
+        if defaults.bool(forKey: "notif.closedEnabled")        { diff.closedPRs.forEach { fire_N6_closed($0) } }
+        
+        if defaults.bool(forKey: "notif.commentEnabled")       { 
+            diff.newComments.forEach { payload in
+                if payload.isBotResponse {
+                    fire_N9(payload)
+                } else {
+                    fire_N7(payload)
+                }
+            }
+        }
+        if defaults.bool(forKey: "notif.copilotEnabled")       { diff.newCopilotReviews.forEach { fire_N8($0) } }
     }
 
     func sendTestNotification() {
@@ -74,20 +89,21 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
 
     private func fire(identifier: String, title: String, body: String, userInfo: [AnyHashable: Any] = [:]) {
         guard !sentIDs.contains(identifier) else { return }
-        // Reserve the slot optimistically so concurrent polls don't double-fire,
-        // but remove it in the completion handler if the OS rejects it so the
-        // next poll can retry (e.g. permission was just granted).
         sentIDs.insert(identifier)
+        
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
         content.sound = .default
         content.userInfo = userInfo
+        
         let req = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(req) { [weak self] error in
-            if error != nil {
-                // OS rejected it (permission not granted, etc.) — allow retry next poll
+            if let error = error {
+                print("[NotificationManager] ❌ Failed to add request \(identifier): \(error)")
                 DispatchQueue.main.async { self?.sentIDs.remove(identifier) }
+            } else {
+                print("[NotificationManager] ✅ Added request \(identifier)")
             }
         }
     }
@@ -176,6 +192,30 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
              title: "🤖 Copilot Review Ready",
              body: summary,
              userInfo: ["eventType": "N8", "prNodeID": pr.id])
+    }
+
+    // N9 — Bot Response (Custom CI/CD)
+    private func fire_N9(_ payload: CommentNotificationPayload) {
+        let prefix: String
+        let titlePref: String
+        
+        switch payload.isSuccess {
+        case true:
+            prefix = "🧪 "
+            titlePref = "Test Success"
+        case false:
+            prefix = "❌ "
+            titlePref = "Test Failure"
+        default:
+            prefix = "🤖 "
+            titlePref = "Bot Response"
+        }
+        
+        let preview = String(payload.body.prefix(80))
+        fire(identifier: "N9-\(payload.pr.repoFullName)-\(payload.pr.number)-\(payload.id)",
+             title: "\(prefix)\(titlePref) — \(payload.pr.repoFullName)",
+             body: "\(payload.author.login): \"\(preview)\"",
+             userInfo: ["eventType": "N9", "prNodeID": payload.pr.id])
     }
 
     // MARK: - UNUserNotificationCenterDelegate

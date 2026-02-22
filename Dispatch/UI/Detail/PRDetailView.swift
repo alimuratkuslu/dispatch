@@ -6,6 +6,8 @@ struct PRDetailView: View {
 
     @Environment(DataStore.self) private var dataStore
     @State private var showResolved: Bool = false
+    @State private var customCommand: String = ""
+    @State private var isSendingCommand: Bool = false
 
     private let builder = CommentThreadBuilder()
 
@@ -32,6 +34,8 @@ struct PRDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     prSummaryHeader
+                    Divider()
+                    quickCommands
                     Divider()
                     contentArea
                 }
@@ -300,6 +304,81 @@ struct PRDetailView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 32)
+    }
+
+    // MARK: - Quick Commands
+
+    private var quickCommands: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("QUICK COMMANDS")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.secondary)
+            
+            HStack(spacing: 8) {
+                commandButton(label: "!runtests", icon: "testtube.2") { sendCommand("!runtests") }
+                commandButton(label: "!deploy", icon: "rocket") { sendCommand("!deploy") }
+                commandButton(label: "!fix", icon: "wrench.and.screwdriver") { sendCommand("!fix") }
+                
+                Spacer()
+                
+                HStack(spacing: 4) {
+                    TextField("Custom command...", text: $customCommand)
+                        .textFieldStyle(.roundedBorder)
+                        .controlSize(.small)
+                        .frame(width: 140)
+                        .onSubmit { sendCommand(customCommand) }
+                    
+                    Button(action: { sendCommand(customCommand) }) {
+                        Image(systemName: "paperplane.fill")
+                            .font(.system(size: 10))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(customCommand.isEmpty || isSendingCommand)
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(.purple.opacity(0.03))
+    }
+
+    private func commandButton(label: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(label, systemImage: icon)
+                .font(.system(size: 10, weight: .medium))
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .disabled(isSendingCommand)
+    }
+
+    private func sendCommand(_ command: String) {
+        let cmd = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cmd.isEmpty else { return }
+        
+        isSendingCommand = true
+        Task {
+            let parts = pr.repoFullName.split(separator: "/")
+            guard parts.count == 2 else {
+                isSendingCommand = false
+                return
+            }
+            
+            do {
+                try await dataStore.apiClient.postComment(
+                    owner: String(parts[0]),
+                    repo: String(parts[1]),
+                    number: pr.number,
+                    body: cmd
+                )
+                customCommand = ""
+                onRefresh()
+            } catch {
+                print("[Command] Failed to send: \(error)")
+            }
+            isSendingCommand = false
+        }
     }
 }
 

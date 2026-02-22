@@ -72,6 +72,21 @@ end
 
 ---
 
+### B. Fully Automated Sync (Recommended)
+You can now automate the entire process so that `brew upgrade` works instantly after a release.
+1. **Create a PAT**: Go to [GitHub Developer Settings](https://github.com/settings/tokens/new) and create a "Personal Access Token (classic)".
+   - Select the **`repo`** scope.
+   - Copy the token.
+2. **Add to Secrets**: Go to your **`dispatch`** repository → **Settings** → **Secrets and variables** → **Actions**.
+   - Click **New repository secret**.
+   - Name: **`HOMEBREW_TAP_TOKEN`**.
+   - Value: Paste your PAT.
+3. **That's it!**: Every time you push a tag like `v1.2.2`, the CI will automatically:
+   - Build and release the app.
+   - Calculate the new SHA256.
+   - Clone your `homebrew-tap` repo and update `Casks/dispatch.rb`.
+   - Push the update so users can run `brew upgrade`.
+
 ## ✅ 5. Final Checklist
 - [ ] `Secrets.swift` is in `.gitignore`.
 - [ ] App is Notarized (no "Unknown Developer" warnings).
@@ -95,5 +110,28 @@ We have implemented a GitHub Actions workflow to automate the build and release 
    - Create a new GitHub Release with the version number.
    - Attach the `Dispatch.zip` as a release asset.
 
-> [!NOTE]
-> Since GitHub Actions runners don't have access to your private Development Team certificates by default, the CI workflow currently builds with `CODE_SIGNING_ALLOWED=NO`. For professional distribution with Notarization, you would eventually need to add your signing certificates and profiles as GitHub Secrets.
+> [!IMPORTANT]
+> **Prerequisite for CI**: You MUST go to your GitHub repo settings → **Secrets and variables** → **Actions** and add a secret named `GITHUB_CLIENT_ID` containing your OAuth App client ID. The release workflow needs this to generate `Secrets.swift` during the build.
+
+## 📥 7. Installation & Updates
+
+### **First Time Installation**
+1. Go to the [Releases](https://github.com/alimuratkuslu/dispatch/releases) page of your repository.
+2. Download the `Dispatch.zip` file from the latest release.
+3. Double-click the ZIP to extract it.
+4. Drag `Dispatch.app` into your **Applications** folder.
+5. Right-click `Dispatch.app` and choose **Open** (the first time only) to bypass any "Unidentified Developer" warnings if you haven't notarized it yet.
+
+### **Updating to a New Version**
+1. Follow the same steps as above to download the latest `Dispatch.zip`.
+2. Drag the new `Dispatch.app` into your **Applications** folder, choosing **Replace** when prompted.
+3. Your account tokens and monitored repositories are stored securely in the system Keychain and UserDefaults, so they will persist across updates.
+
+### **Troubleshooting Notifications**
+If you are not receiving alerts after installing:
+1. Open **Dispatch Preferences** (Right-click menu icon -> Preferences).
+2. Go to the **Notifications** tab.
+3. Check the **Permission** status:
+   - If it says **"Not Granted"**, click the button to request permission or go to macOS System Settings -> Notifications -> Dispatch to enable them manually.
+4. Click **"Send Test Notification"** to verify the connection.
+5. **CI Signing**: Ensure you are using the app built by GitHub Actions (v1.2.2+). These versions are ad-hoc signed, which is required for reliable notification delivery on macOS 15+.

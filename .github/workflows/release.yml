@@ -37,7 +37,7 @@ jobs:
             -configuration Release \
             -sdk macosx \
             -derivedDataPath DerivedData \
-            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_IDENTITY="-" \
             build
 
       - name: Create Archive

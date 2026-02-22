@@ -192,7 +192,7 @@ final class DataStore {
                 (ignoreSelf ? $0.author.login != viewerLogin : true)
             }
             for c in freshGeneral {
-                newComments.append(CommentNotificationPayload(pr: pr, id: c.id, body: c.body, author: c.author))
+                newComments.append(makeCommentPayload(pr: pr, id: c.id, body: c.body, author: c.author))
             }
             
             // 2. Thread comments
@@ -202,7 +202,7 @@ final class DataStore {
                 (ignoreSelf ? $0.author.login != viewerLogin : true)
             }
             for c in freshThread {
-                newComments.append(CommentNotificationPayload(pr: pr, id: c.id, body: c.body, author: c.author))
+                newComments.append(makeCommentPayload(pr: pr, id: c.id, body: c.body, author: c.author))
             }
             
             // 3. Review bodies
@@ -212,7 +212,7 @@ final class DataStore {
                 (ignoreSelf ? $0.author.login != viewerLogin : true)
             }
             for r in freshReviews {
-                newComments.append(CommentNotificationPayload(pr: pr, id: r.id, body: r.body, author: r.author))
+                newComments.append(makeCommentPayload(pr: pr, id: r.id, body: r.body, author: r.author))
             }
         }
 
@@ -228,6 +228,36 @@ final class DataStore {
             closedPRs: [],               // split from mergedPRs by PollingEngine after REST check
             newlyOpenedPRs: newlyOpened,
             newComments: newComments, newCopilotReviews: newCopilot
+        )
+    }
+
+    private func makeCommentPayload(pr: PullRequest, id: String, body: String, author: PRAuthor) -> CommentNotificationPayload {
+        let lowercaseBody = body.lowercased()
+        let lowercaseLogin = author.login.lowercased()
+        
+        let isBot = author.isBot || 
+                    lowercaseLogin.contains("bot") || 
+                    lowercaseLogin.contains("app") ||
+                    lowercaseLogin.contains("actions") ||
+                    ["jenkins", "circleci", "travis", "sonar", "deploy", "vercel", "netlify"].contains(where: { lowercaseLogin.contains($0) })
+        
+        var isSuccess: Bool? = nil
+        let successKeywords = ["success", "passed", "✓", "verified", "completed", "deployed", "ready"]
+        let failureKeywords = ["failed", "failure", "error", "unsuccessful", "❌", "✘"]
+        
+        if successKeywords.contains(where: { lowercaseBody.contains($0) }) {
+            isSuccess = true
+        } else if failureKeywords.contains(where: { lowercaseBody.contains($0) }) {
+            isSuccess = false
+        }
+        
+        return CommentNotificationPayload(
+            pr: pr,
+            id: id,
+            body: body,
+            author: author,
+            isBotResponse: isBot,
+            isSuccess: isSuccess
         )
     }
 
