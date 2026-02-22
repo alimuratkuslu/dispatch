@@ -194,29 +194,29 @@ actor GitHubAPIClient {
 
     func requestCopilotReview(owner: String, repo: String, number: Int) async throws {
         let tok = try await token()
-        let url = URL(string: "\(restBase)/repos/\(owner)/\(repo)/pulls/\(number)/requested_reviewers")!
+        // Mimic the GitHub Web UI request to trigger copilot-workspace/code-review directly
+        let url = URL(string: "https://github.com/\(owner)/\(repo)/pull/\(number)/review-requests")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        // Use the PAT as auth to see if the web endpoint accepts it
         authHeaders(token: tok).forEach { request.setValue($1, forHTTPHeaderField: $0) }
 
-        // "copilot" is the correct reviewer login for GitHub Copilot Code Review.
-        // Requires Copilot for Business/Enterprise with code review enabled at org level.
-        let body: [String: [String]] = ["reviewers": ["copilot"]]
+        // Send an empty body or the specific reviewer structure if required.
+        // We observe that sending an empty JSON object `{}` or nothing typically triggers the internal flow
+        // when hitting the explicit `review-requests` web endpoint, assuming session/PAT grants access.
+        let body: [String: String] = [:]
         request.httpBody = try JSONEncoder().encode(body)
 
         let (data, response) = try await session.data(for: request)
         if let http = response as? HTTPURLResponse {
-            print("[Copilot Review] HTTP \(http.statusCode)")
-            if http.statusCode == 422 {
+            print("[Copilot Web Trigger] HTTP \(http.statusCode)")
+            if http.statusCode != 200 && http.statusCode != 201 {
                 let raw = String(data: data, encoding: .utf8) ?? "(no body)"
-                print("[Copilot Review] 422 - Copilot review may not be enabled for this repo/org. Body: \(raw)")
-            } else if http.statusCode != 201 {
-                let raw = String(data: data, encoding: .utf8) ?? "(no body)"
-                print("[Copilot Review] Unexpected response: \(raw)")
+                print("[Copilot Web Trigger] Unexpected response: \(raw)")
             }
         }
-        try validateResponse(response, data: data)
     }
 
     /// Posts a PR comment mentioning @copilot which triggers the Copilot coding

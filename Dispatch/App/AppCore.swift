@@ -11,7 +11,6 @@ final class AppCore {
     let pollingEngine: PollingEngine
     let notificationManager = NotificationManager()
 
-    private var detailPanel: PRDetailPanel?
     private var preferencesWindowController: PreferencesWindow?
     private var onboardingCoordinator: OnboardingCoordinator?
     private var statusBarController: StatusBarController?
@@ -67,7 +66,7 @@ final class AppCore {
         ) { [weak self] note in
             guard let self, let id = note.object as? String,
                   let pr = self.dataStore.pullRequests.first(where: { $0.id == id }) else { return }
-            self.openDetailPanel(for: pr)
+            self.statusBarController?.showPopover()
         }
 
         let prefsToken = NotificationCenter.default.addObserver(
@@ -87,21 +86,6 @@ final class AppCore {
                 self.onboardingCoordinator = coordinator
             }
         }
-    }
-
-    // MARK: - Detail Panel
-
-    func openDetailPanel(for pr: PullRequest) {
-        let currentPR = dataStore.pullRequests.first(where: { $0.id == pr.id }) ?? pr
-        if detailPanel == nil {
-            detailPanel = PRDetailPanel()
-        }
-        let screenFrame = NSScreen.main?.visibleFrame ?? .zero
-        let nearFrame = NSRect(x: screenFrame.maxX - 500, y: screenFrame.maxY - 40, width: 1, height: 1)
-        detailPanel?.show(pr: currentPR, dataStore: dataStore, onRefresh: { [weak self] in
-            self?.pollingEngine.triggerImmediatePoll()
-        }, near: nearFrame, in: NSScreen.main)
-        NSApp.activate(ignoringOtherApps: true)
     }
 
     // MARK: - Preferences
@@ -143,13 +127,14 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         popover.delegate = self
         
         let root = PopoverView(
-            onOpenDetail: { [weak core] pr in core?.openDetailPanel(for: pr) },
             onOpenPreferences: { [weak core] in core?.openPreferences() },
             onClosePopover: { [weak self] in self?.popover.performClose(nil) },
             onRefresh: { [weak core] in core?.pollingEngine.triggerImmediatePoll() }
         ).environment(core.dataStore)
         
-        popover.contentViewController = NSHostingController(rootView: root)
+        let hostingController = NSHostingController(rootView: root)
+        hostingController.sizingOptions = .preferredContentSize
+        popover.contentViewController = hostingController
         
         if let button = statusBarItem.button {
             button.action = #selector(handleAction)
@@ -160,6 +145,12 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         
         NotificationCenter.default.addObserver(forName: .dataStoreUpdated, object: nil, queue: .main) { [weak self] _ in
             self?.updateIcon()
+        }
+    }
+
+    func showPopover() {
+        if !popover.isShown, let button = statusBarItem.button {
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         }
     }
     
