@@ -5,6 +5,10 @@ on:
     tags:
       - 'v*'
 
+# Grant permission to create a release and upload assets
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build & Release
@@ -19,6 +23,7 @@ jobs:
         # a GitHub Actions secret. Go to your repo → Settings → Secrets → Actions
         # and add a secret named GITHUB_CLIENT_ID with your OAuth App client ID.
         run: |
+          mkdir -p Dispatch/App
           cat > Dispatch/App/Secrets.swift << 'EOF'
           import Foundation
           enum Secrets {
@@ -41,17 +46,24 @@ jobs:
 
       - name: Create Archive
         run: |
-          mkdir -p build
-          APP_PATH=$(find DerivedData -name "Dispatch.app" -type d | head -1)
+          mkdir -p dist
+          # Find the app and copy it to a clean distribution folder
+          APP_PATH=$(find DerivedData -name "Dispatch.app" -type d -path "*/Build/Products/Release/*" | head -1)
+          if [ -z "$APP_PATH" ]; then
+            echo "Error: Dispatch.app not found in Release build products!"
+            exit 1
+          fi
           echo "Found app at: $APP_PATH"
-          cp -R "$APP_PATH" build/
-          cd build
-          zip -r Dispatch.zip Dispatch.app
+          cp -R "$APP_PATH" dist/
+          cd dist
+          zip -r ../Dispatch.zip Dispatch.app
+          cd ..
+          ls -lh Dispatch.zip
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: build/Dispatch.zip
+          files: Dispatch.zip
           draft: false
           prerelease: false
           body: |
