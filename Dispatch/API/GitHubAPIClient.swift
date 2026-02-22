@@ -316,8 +316,18 @@ actor GitHubAPIClient {
                 expiresIn: json.expires_in
             )
         }
+        
+        // Attempt to parse GitHub's error response
+        if let errResp = try? JSONDecoder().decode(OAuthErrorResponse.self, from: data) {
+            let msg = errResp.error_description ?? errResp.error ?? errResp.message ?? "Unknown GitHub OAuth error"
+            throw APIError.deviceFlowError(msg)
+        }
+        
+        // Print the raw response string to see what went wrong
+        let rawResponse = String(data: data, encoding: .utf8) ?? "(no body)"
+        print("Device flow failed. Raw response: \\(rawResponse)")
 
-        throw APIError.deviceFlowError("Invalid response from device code endpoint")
+        throw APIError.deviceFlowError("Invalid response from device code endpoint. \\(rawResponse)")
     }
 
     func pollForToken(clientID: String, deviceCode: String) async throws -> String {

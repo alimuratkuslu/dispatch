@@ -15,25 +15,25 @@ struct PRRowView: View {
                     AvatarView(url: pr.author.avatarURL, size: 30)
                         .shadow(color: .black.opacity(0.1), radius: 2, y: 1)
 
-                    VStack(alignment: .leading, spacing: 3) {
+                    VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 6) {
                             if pr.isDraft {
                                 Text("DRAFT")
-                                    .font(.system(size: 8, weight: .bold))
+                                    .font(.system(size: 8, weight: .bold, design: .default))
                                     .foregroundStyle(.secondary)
-                                    .padding(.horizontal, 4).padding(.vertical, 1)
-                                    .background(.secondary.opacity(0.1))
+                                    .padding(.horizontal, 4).padding(.vertical, 2)
+                                    .background(.secondary.opacity(0.15))
                                     .clipShape(RoundedRectangle(cornerRadius: 3))
                             }
                             Text(pr.title)
                                 .lineLimit(1)
-                                .font(.system(size: 13, weight: .semibold))
+                                .font(.system(size: 13, weight: .semibold, design: .default))
                                 .foregroundStyle(.primary)
                         }
 
                         HStack(spacing: 6) {
                             Text("#\(pr.number)")
-                                .font(.system(size: 10, weight: .bold))
+                                .font(.system(size: 11, weight: .medium, design: .default))
                                 .foregroundStyle(.secondary)
                             
                             ReviewBadge(state: pr.overallReviewState)
@@ -47,22 +47,22 @@ struct PRRowView: View {
                             
                             if unreadCount > 0 {
                                 HStack(spacing: 3) {
-                                    Image(systemName: "bubble.left.fill")
-                                        .font(.system(size: 9))
+                                    Image(systemName: "circle.fill")
+                                        .font(.system(size: 6))
                                     Text("\(unreadCount)")
-                                        .font(.system(size: 10, weight: .bold))
+                                        .font(.system(size: 11, weight: .bold, design: .default))
                                 }
                                 .foregroundStyle(.blue)
                             }
                             
                             Text(pr.updatedAt, style: .relative)
-                                .font(.system(size: 10))
+                                .font(.system(size: 11, weight: .regular, design: .default))
                                 .foregroundStyle(.tertiary)
                         }
                     }
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 10)
+                .padding(.vertical, 12)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
@@ -81,7 +81,9 @@ struct PRRowView: View {
             .padding(.trailing, 16)
             .opacity(isHovered ? 1 : 0)
         }
-        .background(isHovered ? Color.primary.opacity(0.04) : Color.clear)
+        .background(isHovered ? Color.secondary.opacity(0.1) : Color.clear)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .padding(.horizontal, 8)
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.15)) {
                 isHovered = hovering

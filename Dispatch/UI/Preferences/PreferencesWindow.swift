@@ -43,28 +43,64 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
 
 // MARK: - PreferencesView
 
+enum PreferenceTab: String, CaseIterable, Identifiable {
+    case general = "General"
+    case notifications = "Notifications"
+    case accounts = "Accounts"
+    case repositories = "Repositories"
+    
+    var id: String { rawValue }
+    
+    var iconName: String {
+        switch self {
+        case .general: return "gear"
+        case .notifications: return "bell"
+        case .accounts: return "person.crop.circle"
+        case .repositories: return "folder"
+        }
+    }
+}
+
 struct PreferencesView: View {
     let dataStore: DataStore
     let pollingEngine: PollingEngine
     let notificationManager: NotificationManager
+    
+    @State private var selectedTab: PreferenceTab? = .general
 
     var body: some View {
-        TabView {
-            GeneralTab(pollingEngine: pollingEngine)
-                .tabItem { Label("General", systemImage: "gear") }
-
-            NotificationsTab(notificationManager: notificationManager)
-                .tabItem { Label("Notifications", systemImage: "bell") }
-
-            AccountsTab()
-                .tabItem { Label("Accounts", systemImage: "person.circle") }
-
-            RepositoriesTab()
-                .tabItem { Label("Repositories", systemImage: "folder") }
+        NavigationSplitView {
+            List(selection: $selectedTab) {
+                ForEach(PreferenceTab.allCases) { tab in
+                    NavigationLink(value: tab) {
+                        Label(tab.rawValue, systemImage: tab.iconName)
+                            .font(.system(size: 13, weight: .medium, design: .default))
+                            .padding(.vertical, 4)
+                    }
+                }
+            }
+            .navigationSplitViewColumnWidth(min: 150, ideal: 180, max: 220)
+            .listStyle(.sidebar)
+        } detail: {
+            Group {
+                switch selectedTab {
+                case .general:
+                    GeneralTab(pollingEngine: pollingEngine)
+                case .notifications:
+                    NotificationsTab(notificationManager: notificationManager)
+                case .accounts:
+                    AccountsTab()
+                case .repositories:
+                    RepositoriesTab()
+                case .none:
+                    Text("Select a category")
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .environment(dataStore)
         }
-        .frame(width: 520, height: 420)
-        .padding(.top, 12)
-        .environment(dataStore)
+        .frame(minWidth: 600, minHeight: 450)
     }
 }
 
@@ -135,6 +171,7 @@ struct GeneralTab: View {
             }
         }
         .formStyle(.grouped)
+        .navigationTitle("General")
         .padding()
     }
 
@@ -217,9 +254,9 @@ struct NotificationsTab: View {
                     Toggle("Copilot review ready (N8)", isOn: $copilotEnabled)
                 }
             }
-
         }
         .formStyle(.grouped)
+        .navigationTitle("Notifications")
         .padding()
     }
 }
@@ -284,13 +321,15 @@ struct AccountsTab: View {
                             showingConnectSheet = true
                         }
                         .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
+                    .padding(.vertical, 32)
                 }
             }
         }
         .formStyle(.grouped)
+        .navigationTitle("Accounts")
         .padding()
         .sheet(isPresented: $showingConnectSheet) {
             ConnectAccountSheet()
@@ -373,6 +412,7 @@ struct RepositoriesTab: View {
             }
         }
         .formStyle(.grouped)
+        .navigationTitle("Repositories")
         .padding()
         .sheet(isPresented: $showingAddSheet) {
             RepoPickerSheet(dataStore: dataStore)

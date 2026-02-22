@@ -31,18 +31,18 @@ struct PopoverView: View {
         }
         .frame(width: 360)
         .frame(minHeight: 200, maxHeight: 600)
-        .background(VisualEffectView(material: .sidebar, blendingMode: .behindWindow).ignoresSafeArea())
+        .background(VisualEffectView(material: .popover, blendingMode: .behindWindow).ignoresSafeArea())
     }
 
     // MARK: - Header
     private var headerBar: some View {
         HStack(spacing: 8) {
             Image(systemName: "point.3.connected.trianglepath.dotted")
-                .font(.system(size: 13, weight: .bold))
+                .font(.system(size: 14, weight: .bold))
                 .foregroundStyle(.primary)
             
             Text("Dispatch")
-                .font(.system(size: 14, weight: .bold))
+                .font(.system(size: 15, weight: .bold, design: .default))
                 .tracking(-0.3)
             
             Spacer()
@@ -212,9 +212,10 @@ struct SectionHeader: View {
 
     var body: some View {
         HStack {
-            Text(title)
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(.primary)
+            Text(title.uppercased())
+                .font(.system(size: 10, weight: .bold, design: .default))
+                .foregroundStyle(.secondary)
+                .tracking(0.5)
             Spacer()
             if let count = count {
                 Text("\(count)")
