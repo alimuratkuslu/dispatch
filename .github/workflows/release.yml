@@ -23,7 +23,7 @@ jobs:
           cat > Dispatch/App/Secrets.swift << 'EOF'
           import Foundation
           enum Secrets {
-              static let githubClientID = "${{ secrets.GITHUB_CLIENT_ID }}"
+              static let githubClientID = "${{ secrets.DISPATCH_CLIENT_ID }}"
           }
           EOF
 

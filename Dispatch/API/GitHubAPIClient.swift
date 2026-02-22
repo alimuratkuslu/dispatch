@@ -295,6 +295,10 @@ actor GitHubAPIClient {
     }
 
     func requestDeviceCode(clientID: String) async throws -> DeviceCodeResponse {
+        guard !clientID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw APIError.deviceFlowError("GitHub Client ID is missing. If you downloaded a release build, ensure the DISPATCH_CLIENT_ID secret is set in your GitHub repository before compiling.")
+        }
+        
         let url = URL(string: "https://github.com/login/device/code")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
