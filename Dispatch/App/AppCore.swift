@@ -129,11 +129,15 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         let root = PopoverView(
             onOpenPreferences: { [weak core] in core?.openPreferences() },
             onClosePopover: { [weak self] in self?.popover.performClose(nil) },
-            onRefresh: { [weak core] in core?.pollingEngine.triggerImmediatePoll() }
+            onRefresh: { [weak core] in core?.pollingEngine.triggerImmediatePoll() },
+            onDetailToggled: { [weak self] isDetail in
+                guard let self = self else { return }
+                self.popover.animates = true
+                self.popover.contentSize = isDetail ? NSSize(width: 480, height: 720) : NSSize(width: 360, height: 520)
+            }
         ).environment(core.dataStore)
         
         let hostingController = NSHostingController(rootView: root)
-        hostingController.sizingOptions = .preferredContentSize
         popover.contentViewController = hostingController
         
         if let button = statusBarItem.button {

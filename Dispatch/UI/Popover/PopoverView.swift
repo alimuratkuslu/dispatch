@@ -2,14 +2,32 @@ import SwiftUI
 
 struct PopoverView: View {
     @Environment(DataStore.self) private var dataStore
-    var onOpenDetail: (PullRequest) -> Void = { _ in }
     var onOpenPreferences: () -> Void = {}
     var onClosePopover: () -> Void = {}
     var onRefresh: () -> Void = {}
+    var onDetailToggled: ((Bool) -> Void)? = nil
+    
+    @State private var selectedPR: PullRequest? = nil
 
     private let builder = CommentThreadBuilder()
 
     var body: some View {
+        VStack(spacing: 0) {
+            if let pr = selectedPR {
+                detailView(for: pr)
+            } else {
+                listView
+            }
+        }
+        .frame(width: selectedPR == nil ? 360 : 480)
+        .frame(minHeight: 200, maxHeight: selectedPR == nil ? 600 : 720)
+        .background(VisualEffectView(material: .popover, blendingMode: .behindWindow).ignoresSafeArea())
+        .onChange(of: selectedPR != nil) { _, isDetail in
+            onDetailToggled?(isDetail)
+        }
+    }
+
+    private var listView: some View {
         VStack(spacing: 0) {
             headerBar
             Divider().opacity(0.1)
@@ -32,9 +50,18 @@ struct PopoverView: View {
                 .scrollIndicators(.never)
             }
         }
-        .frame(width: 360)
-        .frame(minHeight: 200, maxHeight: 600)
-        .background(VisualEffectView(material: .popover, blendingMode: .behindWindow).ignoresSafeArea())
+    }
+
+    private func detailView(for pr: PullRequest) -> some View {
+        PRDetailView(
+            pr: pr,
+            onRefresh: onRefresh,
+            onBack: {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    selectedPR = nil
+                }
+            }
+        )
     }
 
     // MARK: - Header
@@ -112,8 +139,8 @@ struct PopoverView: View {
             SectionHeader(title: "ACTION REQUIRED", count: dataStore.reviewRequests.count)
             ForEach(dataStore.reviewRequests) { pr in
                 PendingReviewRow(pr: pr) { 
-                    withAnimation(.spring(response: 0.3)) {
-                        onOpenDetail(pr) 
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                        selectedPR = pr
                     }
                 }
                 Divider().opacity(0.05).padding(.leading, 16)
@@ -152,7 +179,9 @@ struct PopoverView: View {
 
             ForEach(prs) { pr in
                 PRRowView(pr: pr, unreadCount: dataStore.unreadCommentCount(for: pr)) {
-                    onOpenDetail(pr)
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                        selectedPR = pr
+                    }
                 }
                 if pr != prs.last {
                     Divider().opacity(0.05).padding(.leading, 16)
