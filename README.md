@@ -19,9 +19,11 @@
 
 ## ✨ Features
 
-- 🚀 **Real-Time Polling**: Get notified the second a review is requested or a thread is resolved.
-- 🎨 **Native Design**: Built with SwiftUI for a perfect macOS menu bar experience.
-- 🛠 **CI/CD Integration**: See your GitHub Actions status directly in the popover.
+- 🚀 **Real-Time Monitoring**: Adaptive menu bar icon with CI health and review status dots.
+- 💎 **Elite UI**: Glassmorphism design, micro-animations, and native popover anchoring.
+- 💬 **In-App Collaboration**: Reply to review threads directly without leaving the app.
+- ⚠️ **Conflict Detection**: Visual warnings and "Copy Fix Command" for merge conflicts.
+- 🤖 **AI-Ready**: Trigger Copilot reviews and view AI-generated PR summaries.
 - 🔒 **Secure**: OAuth login with tokens stored safely in your macOS Keychain.
 - 🆓 **100% Free**: No paywalls, no limits, just pure open-source productivity.
 

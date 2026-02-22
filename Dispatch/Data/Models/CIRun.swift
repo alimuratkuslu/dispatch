@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 enum CIStatus: String, Codable, Hashable {
     case passing
@@ -32,6 +33,16 @@ enum CIStatus: String, Codable, Hashable {
         case "FAILURE", "ERROR": self = .failing
         case "PENDING", "EXPECTED": self = .pending
         default: self = .unknown
+        }
+    }
+
+    var dotColor: Color {
+        switch self {
+        case .passing: return .green
+        case .failing: return .red
+        case .pending: return .yellow
+        case .skipped: return .gray
+        case .unknown: return .gray
         }
     }
 

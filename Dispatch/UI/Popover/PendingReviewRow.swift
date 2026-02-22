@@ -3,27 +3,33 @@ import SwiftUI
 struct PendingReviewRow: View {
     let pr: PullRequest
     let onTap: () -> Void
+    
+    @State private var isHovered = false
 
     var body: some View {
         Button(action: onTap) {
-            HStack(spacing: 8) {
-                AvatarView(url: pr.author.avatarURL, size: 24)
+            HStack(spacing: 12) {
+                AvatarView(url: pr.author.avatarURL, size: 28)
+                    .shadow(color: .black.opacity(0.1), radius: 2, y: 1)
 
-                VStack(alignment: .leading, spacing: 1) {
-                    HStack(spacing: 4) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
                         Text(pr.repoFullName)
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(.blue)
                             .padding(.horizontal, 4).padding(.vertical, 1)
-                            .background(.secondary.opacity(0.1))
+                            .background(Color.blue.opacity(0.1))
                             .clipShape(RoundedRectangle(cornerRadius: 3))
+                        
                         Text(pr.title)
-                            .font(.system(size: 11, weight: .medium))
+                            .font(.system(size: 12, weight: .semibold))
                             .lineLimit(1)
+                            .foregroundStyle(.primary)
                     }
+                    
                     HStack(spacing: 4) {
                         Text(pr.author.login)
-                            .font(.system(size: 10))
+                            .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(.secondary)
                         Spacer()
                         Text(pr.updatedAt, style: .relative)
@@ -32,10 +38,16 @@ struct PendingReviewRow: View {
                     }
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .background(isHovered ? Color.primary.opacity(0.04) : Color.clear)
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isHovered = hovering
+            }
+        }
     }
 }

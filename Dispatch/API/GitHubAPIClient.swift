@@ -165,6 +165,70 @@ final class GitHubAPIClient {
         return status == 204
     }
 
+    func markPullRequestReady(id: String) async throws {
+        let tok = try await token()
+        let input: [String: JSONValue] = ["pullRequestId": .string(id)]
+        let body = GraphQLBody(query: GitHubGraphQL.markReadyMutation,
+                               variables: ["input": .dictionary(input)])
+        let bodyData = try JSONEncoder().encode(body)
+
+        var request = URLRequest(url: graphqlEndpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        authHeaders(token: tok).forEach { request.setValue($1, forHTTPHeaderField: $0) }
+        request.httpBody = bodyData
+
+        let (data, response) = try await session.data(for: request)
+        try validateResponse(response, data: data)
+
+        let response2 = try JSONDecoder().decode(GraphQLResponse<MarkReadyData>.self, from: data)
+        if let errors = response2.errors, !errors.isEmpty {
+            throw APIError.graphQLError(errors.map(\.message).joined(separator: "; "))
+        }
+    }
+
+    func requestCopilotReview(owner: String, repo: String, number: Int) async throws {
+        let tok = try await token()
+        let url = URL(string: "\(restBase)/repos/\(owner)/\(repo)/pulls/\(number)/requested_reviewers")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        authHeaders(token: tok).forEach { request.setValue($1, forHTTPHeaderField: $0) }
+        
+        let body: [String: [String]] = ["reviewers": ["github-copilot"]]
+        request.httpBody = try JSONEncoder().encode(body)
+
+        let (data, response) = try await session.data(for: request)
+        if let http = response as? HTTPURLResponse {
+            print("[Copilot Review] HTTP \(http.statusCode)")
+            if http.statusCode != 201 {
+                let raw = String(data: data, encoding: .utf8) ?? "(no body)"
+                print("[Copilot Review] Error body: \(raw)")
+            }
+        }
+        try validateResponse(response, data: data)
+    }
+
+    func submitThreadReply(threadID: String, body: String) async throws {
+        let tok = try await token()
+        let input: [String: JSONValue] = [
+            "pullRequestReviewThreadId": .string(threadID),
+            "body": .string(body)
+        ]
+        let gBody = GraphQLBody(query: GitHubGraphQL.addThreadReplyMutation,
+                                variables: ["input": .dictionary(input)])
+        let bodyData = try JSONEncoder().encode(gBody)
+
+        var request = URLRequest(url: graphqlEndpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        authHeaders(token: tok).forEach { request.setValue($1, forHTTPHeaderField: $0) }
+        request.httpBody = bodyData
+
+        let (data, response) = try await session.data(for: request)
+        try validateResponse(response, data: data)
+    }
+
     // MARK: - Rate limit check
     func checkRateLimit() async throws -> (remaining: Int, resetDate: Date) {
         let tok = try await token()
@@ -343,10 +407,27 @@ private struct GraphQLBody: Encodable {
 private enum JSONValue: Encodable {
     case string(String)
     case int(Int)
+    case dictionary([String: JSONValue])
+
     func encode(to encoder: Encoder) throws {
         var c = encoder.singleValueContainer()
-        switch self { case .string(let s): try c.encode(s); case .int(let i): try c.encode(i) }
+        switch self {
+        case .string(let s): try c.encode(s)
+        case .int(let i): try c.encode(i)
+        case .dictionary(let d):
+            var container = encoder.container(keyedBy: DynamicCodingKeys.self)
+            for (key, value) in d {
+                try container.encode(value, forKey: DynamicCodingKeys(stringValue: key)!)
+            }
+        }
     }
+}
+
+private struct DynamicCodingKeys: CodingKey {
+    var stringValue: String
+    init?(stringValue: String) { self.stringValue = stringValue }
+    var intValue: Int? { nil }
+    init?(intValue: Int) { return nil }
 }
 
 private struct GraphQLResponse<T: Decodable>: Decodable {
@@ -377,12 +458,14 @@ private struct StatusRollupNode: Decodable { let state: String }
 private struct PRNode: Decodable {
     let id: String
     let number: Int
+    let state: String
     let title: String
     let url: String
     let headRefName: String
     let createdAt: Date
     let updatedAt: Date
     let isDraft: Bool
+    let mergeable: String
     let author: AuthorNode?
     let reviewRequests: NodesWrapper<ReviewRequestNode>?
     let comments: NodesWrapper<CommentNode>?
@@ -417,7 +500,9 @@ private struct PRNode: Decodable {
             }
             return ReviewThread(id: thread.id, path: thread.path, line: thread.line, isResolved: thread.isResolved, comments: threadComments, prNodeID: id)
         }
-        return PullRequest(id: id, number: number, title: title, url: prURL, author: prAuthor, repoFullName: repoFullName, isDraft: isDraft, headRefName: headRefName, latestCommitMessage: commitMsg, createdAt: createdAt, updatedAt: updatedAt, reviews: mappedReviews, comments: mappedComments, reviewThreads: mappedThreads, ciStatus: ciStatus, requestedReviewerLogins: reviewerLogins)
+        let mState = PullRequest.MergeableState(rawValue: mergeable) ?? .unknown
+        let prState = PullRequest.PRState(rawValue: state) ?? .open
+        return PullRequest(id: id, number: number, state: prState, title: title, url: prURL, author: prAuthor, repoFullName: repoFullName, isDraft: isDraft, mergeable: mState, headRefName: headRefName, latestCommitMessage: commitMsg, createdAt: createdAt, updatedAt: updatedAt, reviews: mappedReviews, comments: mappedComments, reviewThreads: mappedThreads, ciStatus: ciStatus, requestedReviewerLogins: reviewerLogins)
     }
 }
 
@@ -525,4 +610,15 @@ private struct RateLimitResponse: Decodable {
 private struct RateLimitData: Decodable {
     let remaining: Int
     let reset: Int
+}
+
+private struct MarkReadyData: Decodable {
+    let markPullRequestReadyForReview: MarkReadyPayload
+}
+private struct MarkReadyPayload: Decodable {
+    let pullRequest: MarkReadyNode
+}
+private struct MarkReadyNode: Decodable {
+    let id: String
+    let isDraft: Bool
 }

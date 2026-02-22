@@ -2,7 +2,10 @@ import SwiftUI
 
 struct ReviewThreadView: View {
     let thread: ReviewThread
+    @Environment(DataStore.self) private var dataStore
     @State private var isExpanded: Bool = true
+    @State private var replyBody: String = ""
+    @State private var isSubmitting: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -59,6 +62,31 @@ struct ReviewThreadView: View {
                             Divider().padding(.leading, isReply ? 28 : 12)
                         }
                     }
+
+                    if !thread.isResolved {
+                        Divider().padding(.leading, 12)
+                        HStack(spacing: 8) {
+                            TextField("Reply...", text: $replyBody)
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 11))
+                                .padding(6)
+                                .background(.secondary.opacity(0.1))
+                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                            
+                            if isSubmitting {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Button("Reply") {
+                                    submitReply()
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.mini)
+                                .disabled(replyBody.isEmpty)
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                    }
                 }
                 .background(.secondary.opacity(0.02))
                 .overlay(alignment: .leading) {
@@ -77,5 +105,21 @@ struct ReviewThreadView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 3)
         .opacity(thread.isResolved ? 0.65 : 1.0)
+    }
+
+    private func submitReply() {
+        guard !replyBody.isEmpty else { return }
+        isSubmitting = true
+        Task {
+            do {
+                try await dataStore.apiClient.submitThreadReply(threadID: thread.id, body: replyBody)
+                replyBody = ""
+                // Refreshes the detail view by polling GitHub again
+                NotificationCenter.default.post(name: NSNotification.Name("com.dispatch.refreshPR"), object: nil)
+            } catch {
+                print("Failed to submit reply: \(error)")
+            }
+            isSubmitting = false
+        }
     }
 }

@@ -59,12 +59,12 @@ To let users install with `brew install --cask dispatch`:
 ```ruby
 cask "dispatch" do
   version "1.0.0"
-  sha256 "PASTE_YOUR_SHA256_HERE"
+  sha256 "7e8b8020d0f5efc0f0c0839cb3283a0370b0a37cf3b86958f65b684928cd5945"
 
-  url "https://github.com/YOUR_USERNAME/dispatch/releases/download/v#{version}/Dispatch.zip"
+  url "https://github.com/alimuratkuslu/dispatch/releases/download/v#{version}/Dispatch.zip"
   name "Dispatch"
   desc "Native macOS GitHub PR Event Monitor"
-  homepage "https://github.com/YOUR_USERNAME/dispatch"
+  homepage "https://github.com/alimuratkuslu/dispatch"
 
   app "Dispatch.app"
 end
@@ -76,3 +76,24 @@ end
 - [ ] `Secrets.swift` is in `.gitignore`.
 - [ ] App is Notarized (no "Unknown Developer" warnings).
 - [ ] Homebrew tap points to the correct ZIP URL.
+
+---
+
+## 🚀 6. Automated Releases (GitHub Actions)
+We have implemented a GitHub Actions workflow to automate the build and release process.
+
+### How to Release:
+1. **Commit your changes**: Ensure everything is pushed to `main`.
+2. **Create a Tag**: 
+   ```bash
+   git tag v1.0.1
+   git push origin v1.0.1
+   ```
+3. **Wait for CI**: GitHub Actions will automatically:
+   - Build the app in Release mode.
+   - Archive it into a `.zip`.
+   - Create a new GitHub Release with the version number.
+   - Attach the `Dispatch.zip` as a release asset.
+
+> [!NOTE]
+> Since GitHub Actions runners don't have access to your private Development Team certificates by default, the CI workflow currently builds with `CODE_SIGNING_ALLOWED=NO`. For professional distribution with Notarization, you would eventually need to add your signing certificates and profiles as GitHub Secrets.

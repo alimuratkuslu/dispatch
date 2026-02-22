@@ -113,6 +113,18 @@ struct GeneralTab: View {
                 .pickerStyle(.menu)
             }
 
+            Section("Display") {
+                Toggle("Hide Draft PRs", isOn: Binding(
+                    get: { dataStore.hideDrafts },
+                    set: { dataStore.hideDrafts = $0 }
+                ))
+                Toggle("Sort by activity", isOn: Binding(
+                    get: { dataStore.sortByActivity },
+                    set: { dataStore.sortByActivity = $0 }
+                ))
+                .help("When disabled, PRs are sorted by creation date.")
+            }
+
             Section("About") {
                 HStack {
                     Text("Version")
@@ -184,20 +196,6 @@ struct NotificationsTab: View {
                 }
             }
 
-            Section {
-                Button("Send Test Notification") {
-                    notificationManager.sendTestNotification()
-                    testSent = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { testSent = false }
-                }
-                .disabled(!masterEnabled)
-
-                if testSent {
-                    Text("Test notification sent!")
-                        .font(.caption)
-                        .foregroundStyle(.green)
-                }
-            }
         }
         .formStyle(.grouped)
         .padding()

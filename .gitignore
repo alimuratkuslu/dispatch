@@ -16,6 +16,7 @@ DerivedData
 *.ipa
 *.xcuserstate
 Dispatch/App/Secrets.swift
+distribution.md
 
 # Dependencies
 .build/

@@ -38,10 +38,13 @@ struct PRDetailView: View {
             }
         }
         .frame(width: 480)
-        .frame(minHeight: 300, maxHeight: 640)
-        .background(.regularMaterial)
+        .frame(minHeight: 300, maxHeight: 720)
+        .background(VisualEffectView(material: .sidebar, blendingMode: .behindWindow).ignoresSafeArea())
         .onAppear {
             dataStore.markAsRead(pr)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("com.dispatch.refreshPR"))) { _ in
+            onRefresh()
         }
     }
 
@@ -59,6 +62,39 @@ struct PRDetailView: View {
             }
 
             Spacer()
+
+            if currentPR.isDraft {
+                Button(action: {
+                    Task {
+                        try? await dataStore.apiClient.markPullRequestReady(id: pr.id)
+                        onRefresh()
+                    }
+                }) {
+                    Text("Ready for Review")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.mini)
+                .tint(.green)
+            } else if pr.author.login == dataStore.viewerLogin && !currentPR.hasCopilotReview && !currentPR.isCopilotRequested {
+                Button(action: {
+                    Task {
+                        let parts = pr.repoFullName.split(separator: "/")
+                        guard parts.count == 2 else { return }
+                        do {
+                            try await dataStore.apiClient.requestCopilotReview(owner: String(parts[0]), repo: String(parts[1]), number: pr.number)
+                            onRefresh()
+                        } catch {
+                            print("[AI Review] Failed: \(error.localizedDescription)")
+                        }
+                    }
+                }) {
+                    Label("AI Review", systemImage: "sparkles")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+            }
 
             if dataStore.isLoading {
                 ProgressView()
@@ -88,28 +124,94 @@ struct PRDetailView: View {
     // MARK: - PR summary header
 
     private var prSummaryHeader: some View {
-        HStack(spacing: 8) {
-            AvatarView(url: pr.author.avatarURL, size: 24)
-            Text(pr.author.login)
-                .font(.system(size: 11, weight: .medium))
-            Text("·")
-                .foregroundStyle(.tertiary)
-            Text(pr.createdAt, style: .relative)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-            Spacer()
-            ReviewBadge(state: pr.overallReviewState)
-            CIBadge(status: pr.ciStatus)
+        Group {
+            HStack(spacing: 8) {
+                AvatarView(url: pr.author.avatarURL, size: 24)
+                Text(pr.author.login)
+                    .font(.system(size: 11, weight: .medium))
+                Text("·")
+                    .foregroundStyle(.tertiary)
+                Text(pr.createdAt, style: .relative)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                ReviewBadge(state: pr.overallReviewState)
+                CIBadge(status: pr.ciStatus)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(.secondary.opacity(0.04))
+
+            if currentPR.mergeable == .conflicting {
+                HStack {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                    Text("This branch has merge conflicts that must be resolved.")
+                        .font(.system(size: 11, weight: .medium))
+                    Spacer()
+                Button("Copy Fix Command") {
+                    let cmd = "git fetch origin && git checkout \(currentPR.headRefName) && git merge origin/main"
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(cmd, forType: .string)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(.red.opacity(0.1))
+            .foregroundStyle(.red)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(.secondary.opacity(0.04))
+
+        if currentPR.state == .merged {
+            HStack {
+                Image(systemName: "checkmark.seal.fill")
+                Text("This pull request has been merged!")
+                    .font(.system(size: 11, weight: .medium))
+                Spacer()
+                Button("Copy Cleanup Command") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(currentPR.localCleanupCommand, forType: .string)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(.purple.opacity(0.1))
+            .foregroundStyle(.purple)
+        }
+
+        if currentPR.ciStatus == .failing {
+            HStack {
+                Image(systemName: "xmark.octagon.fill")
+                Text("Checks failed. View logs to debug.")
+                    .font(.system(size: 11, weight: .medium))
+                Spacer()
+                Button("View Logs") {
+                    // Logic to find the failing run URL would go here.
+                    // For now, we open the PR checks page.
+                    NSWorkspace.shared.open(currentPR.url.appendingPathComponent("checks"))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(.red.opacity(0.1))
+            .foregroundStyle(.red)
+        }
     }
+}
 
     // MARK: - Content area
 
     @ViewBuilder
     private var contentArea: some View {
+        if currentPR.state == .open {
+            AISummaryBanner(pr: currentPR)
+                .padding(.top, 8)
+        }
+
         if let copilotReview = builder.copilotReview(from: currentPR) {
             let copilotThreads = builder.copilotThreads(from: currentPR)
             CopilotReviewSection(review: copilotReview, inlineThreadCount: copilotThreads.count)
@@ -191,5 +293,36 @@ struct PRDetailView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 32)
+    }
+}
+
+struct AISummaryBanner: View {
+    let pr: PullRequest
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                Image(systemName: "sparkles")
+                    .foregroundStyle(.purple)
+                Text("DISPATCH AI SUMMARY")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.purple)
+                Spacer()
+            }
+            
+            Text(generatePlaceholderSummary())
+                .font(.system(size: 11))
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+        }
+        .padding(10)
+        .background(Color.purple.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .padding(.horizontal, 12)
+    }
+    
+    private func generatePlaceholderSummary() -> String {
+        let verb = pr.isDraft ? "Drafting" : "Merging"
+        return "\(verb) \(pr.headRefName) into main. This PR contains \(pr.allCommentCount) comments and is currently \(pr.ciStatus.displayName.lowercased())."
     }
 }

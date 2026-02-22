@@ -14,11 +14,24 @@ final class UserDefaultsStore {
         static let notificationPrefs = "notificationPrefs"
         static let copilotReviewsEnabled = "copilotReviewsEnabled"
         static let launchOnStartup = "launchOnStartup"
+        static let hideDrafts = "hideDrafts"
+        static let sortByActivity = "sortByActivity"
     }
 
     init() {
         encoder.dateEncodingStrategy = .iso8601
         decoder.dateDecodingStrategy = .iso8601
+    }
+
+    // MARK: - Filter Prefs
+    var hideDrafts: Bool {
+        get { defaults.bool(forKey: Keys.hideDrafts) }
+        set { defaults.set(newValue, forKey: Keys.hideDrafts) }
+    }
+
+    var sortByActivity: Bool {
+        get { defaults.bool(forKey: Keys.sortByActivity) }
+        set { defaults.set(newValue, forKey: Keys.sortByActivity) }
     }
 
     // MARK: - Repos
@@ -34,7 +47,6 @@ final class UserDefaultsStore {
 
     // MARK: - Unread tracking
     func save(lastSeenCommentAt: [String: Date]) {
-        // Store as [String: Double] (timeIntervalSince1970) for simplicity
         let raw = lastSeenCommentAt.mapValues { $0.timeIntervalSince1970 }
         defaults.set(raw, forKey: Keys.lastSeenCommentAt)
     }

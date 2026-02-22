@@ -11,12 +11,14 @@ enum GitHubGraphQL {
           nodes {
             id
             number
+            state
             title
             url
             headRefName
             createdAt
             updatedAt
             isDraft
+            mergeable
             author {
               login
               avatarUrl
@@ -102,6 +104,28 @@ enum GitHubGraphQL {
               }
             }
           }
+        }
+      }
+    }
+    """
+
+    static let markReadyMutation = """
+    mutation MarkReady($input: MarkPullRequestReadyForReviewInput!) {
+      markPullRequestReadyForReview(input: $input) {
+        pullRequest {
+          id
+          isDraft
+        }
+      }
+    }
+    """
+
+    static let addThreadReplyMutation = """
+    mutation AddReply($input: AddPullRequestReviewThreadReplyInput!) {
+      addPullRequestReviewThreadReply(input: $input) {
+        comment {
+          id
+          body
         }
       }
     }

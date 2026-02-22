@@ -12,7 +12,8 @@ struct PopoverView: View {
     var body: some View {
         VStack(spacing: 0) {
             headerBar
-            Divider()
+            Divider().opacity(0.1)
+            
             if dataStore.monitoredRepositories.isEmpty && !dataStore.isLoading {
                 emptySetupState
             } else {
@@ -23,60 +24,61 @@ struct PopoverView: View {
                         openPRsSection
                         ciHealthSection
                     }
+                    .padding(.bottom, 20)
                 }
+                .scrollIndicators(.never)
             }
         }
         .frame(width: 360)
-        .frame(minHeight: 200, maxHeight: 520)
-        .background(.regularMaterial)
+        .frame(minHeight: 200, maxHeight: 600)
+        .background(VisualEffectView(material: .sidebar, blendingMode: .behindWindow).ignoresSafeArea())
     }
 
     // MARK: - Header
     private var headerBar: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             Image(systemName: "point.3.connected.trianglepath.dotted")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(.primary)
+            
             Text("Dispatch")
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 14, weight: .bold))
+                .tracking(-0.3)
+            
             Spacer()
+            
             if let date = dataStore.lastPollDate {
                 Text("Updated \(date, style: .relative)")
-                    .font(.system(size: 9))
+                    .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
-            // Refresh button — shows spinner while loading
-            Button(action: onRefresh) {
-                if dataStore.isLoading {
-                    ProgressView().controlSize(.mini).frame(width: 12, height: 12)
-                } else {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+            
+            HStack(spacing: 4) {
+                Button(action: onRefresh) {
+                    if dataStore.isLoading {
+                        ProgressView().controlSize(.mini).scaleEffect(0.7)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 12, weight: .medium))
+                    }
                 }
+                .buttonStyle(PlainButtonStyle())
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+                .opacity(dataStore.isLoading ? 1 : 0.6)
+                
+                Button(action: onOpenPreferences) {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .buttonStyle(PlainButtonStyle())
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+                .opacity(0.6)
             }
-            .buttonStyle(.plain)
-            .help("Refresh now")
-            .disabled(dataStore.isLoading)
-
-            Button(action: onOpenPreferences) {
-                Image(systemName: "gear")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .help("Preferences")
-
-            Button(action: onClosePopover) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .help("Close")
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
     }
 
     // MARK: - Status banner
@@ -100,14 +102,18 @@ struct PopoverView: View {
         }
     }
 
-    // MARK: - Your Review Requests
+    // MARK: - Review Requests
     @ViewBuilder
     private var reviewRequestsSection: some View {
         if !dataStore.reviewRequests.isEmpty {
-            SectionHeader(title: "YOUR REVIEW REQUESTS", count: dataStore.reviewRequests.count)
+            SectionHeader(title: "ACTION REQUIRED", count: dataStore.reviewRequests.count)
             ForEach(dataStore.reviewRequests) { pr in
-                PendingReviewRow(pr: pr) { onOpenDetail(pr) }
-                Divider().padding(.leading, 42)
+                PendingReviewRow(pr: pr) { 
+                    withAnimation(.spring(response: 0.3)) {
+                        onOpenDetail(pr) 
+                    }
+                }
+                Divider().opacity(0.05).padding(.leading, 16)
             }
         }
     }
@@ -115,9 +121,9 @@ struct PopoverView: View {
     // MARK: - Open Pull Requests
     @ViewBuilder
     private var openPRsSection: some View {
-        if !dataStore.pullRequests.isEmpty {
-            SectionHeader(title: "OPEN PULL REQUESTS")
-            let grouped = Dictionary(grouping: dataStore.pullRequests, by: \.repoFullName)
+        if !dataStore.visiblePullRequests.isEmpty {
+            SectionHeader(title: "MONITORED PRs")
+            let grouped = Dictionary(grouping: dataStore.visiblePullRequests, by: \.repoFullName)
             let sortedRepos = grouped.keys.sorted()
             ForEach(sortedRepos, id: \.self) { repoName in
                 if let prs = grouped[repoName] {
@@ -132,41 +138,44 @@ struct PopoverView: View {
     private func repoGroup(repoName: String, prs: [PullRequest]) -> some View {
         VStack(spacing: 0) {
             HStack {
-                Text(repoName)
-                    .font(.system(size: 10, weight: .medium))
+                Text(repoName.uppercased())
+                    .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(.secondary)
+                    .opacity(0.6)
                 Spacer()
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 4)
-            .background(.secondary.opacity(0.05))
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
 
             ForEach(prs) { pr in
                 PRRowView(pr: pr, unreadCount: dataStore.unreadCommentCount(for: pr)) {
                     onOpenDetail(pr)
                 }
-                Divider().padding(.leading, 46)
+                if pr != prs.last {
+                    Divider().opacity(0.05).padding(.leading, 16)
+                }
             }
         }
+        .padding(.bottom, 8)
     }
 
     // MARK: - CI Health
     @ViewBuilder
     private var ciHealthSection: some View {
         if !dataStore.ciRuns.isEmpty {
-            SectionHeader(title: "CI HEALTH")
+            SectionHeader(title: "WORKFLOW HEALTH")
             ForEach(dataStore.ciRuns) { ci in
                 CIRowView(ci: ci) {
                     if let url = ci.url { NSWorkspace.shared.open(url) }
                 }
-                Divider().padding(.leading, 26)
+                Divider().opacity(0.05).padding(.leading, 16)
             }
         }
     }
 
     // MARK: - Empty states
     private var emptySetupState: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 16) {
             Image(systemName: "folder.badge.plus")
                 .font(.system(size: 32))
                 .foregroundStyle(.tertiary)
@@ -180,7 +189,7 @@ struct PopoverView: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
         }
-        .padding(24)
+        .padding(32)
         .frame(maxWidth: .infinity)
     }
 
@@ -188,11 +197,11 @@ struct PopoverView: View {
         HStack {
             Spacer()
             Text("No open pull requests")
-                .font(.caption)
+                .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.tertiary)
             Spacer()
         }
-        .padding(.vertical, 16)
+        .padding(.vertical, 32)
     }
 }
 
@@ -204,21 +213,21 @@ struct SectionHeader: View {
     var body: some View {
         HStack {
             Text(title)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.primary)
             Spacer()
             if let count = count {
                 Text("\(count)")
                     .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 5).padding(.vertical, 1)
-                    .background(.secondary.opacity(0.15))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Color.blue)
                     .clipShape(Capsule())
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 8)
-        .padding(.bottom, 4)
+        .padding(.horizontal, 16)
+        .padding(.top, 16)
+        .padding(.bottom, 8)
     }
 }
 
@@ -233,20 +242,20 @@ struct StatusBanner: View {
         HStack(spacing: 8) {
             Image(systemName: icon)
                 .foregroundStyle(color)
-                .font(.system(size: 12))
+                .font(.system(size: 12, weight: .bold))
             Text(message)
-                .font(.system(size: 11))
+                .font(.system(size: 11, weight: .semibold))
             Spacer()
             if let action = action, let label = actionLabel {
                 Button(label, action: action)
-                    .font(.system(size: 11))
+                    .font(.system(size: 11, weight: .bold))
                     .buttonStyle(.bordered)
                     .controlSize(.mini)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(color.opacity(0.08))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(color.opacity(0.1))
     }
 }
 
@@ -269,5 +278,24 @@ struct AvatarView: View {
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
+        .overlay(Circle().stroke(.primary.opacity(0.1), lineWidth: 0.5))
+    }
+}
+
+struct VisualEffectView: NSViewRepresentable {
+    let material: NSVisualEffectView.Material
+    let blendingMode: NSVisualEffectView.BlendingMode
+    
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = material
+        view.blendingMode = blendingMode
+        view.state = .active
+        return view
+    }
+    
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
+        nsView.material = material
+        nsView.blendingMode = blendingMode
     }
 }

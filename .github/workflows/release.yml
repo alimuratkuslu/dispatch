@@ -1,0 +1,49 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build & Release
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Install dependencies
+        run: |
+          # If you use CocoaPods: pod install
+          # If you use SPM, xcodebuild handles it
+          
+      - name: Build App
+        run: |
+          xcodebuild -scheme Dispatch -configuration Release -sdk macosx build CODE_SIGNING_ALLOWED=NO
+          
+      - name: Create Archive
+        run: |
+          mkdir -p build
+          cp -R "/Users/runner/Library/Developer/Xcode/DerivedData/$(ls /Users/runner/Library/Developer/Xcode/DerivedData | grep Dispatch-)/Build/Products/Release/Dispatch.app" build/
+          cd build
+          zip -r Dispatch.zip Dispatch.app
+          
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/Dispatch.zip
+          draft: false
+          prerelease: false
+          body: |
+            ## New Release: ${{ github.ref_name }}
+            
+            Dispatch is updated with new features and improvements.
+            
+            ### Installation
+            1. Download `Dispatch.zip`
+            2. Extract and move `Dispatch.app` to your Applications folder.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -30,7 +30,7 @@ enum APIError: LocalizedError {
 
     static func from(statusCode: Int, headers: [AnyHashable: Any]) -> APIError? {
         switch statusCode {
-        case 200, 304: return nil
+        case 200, 201, 204, 304: return nil
         case 401: return .unauthorized
         case 403:
             if let reset = headers["X-RateLimit-Reset"] as? String,

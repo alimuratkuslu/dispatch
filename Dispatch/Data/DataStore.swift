@@ -17,8 +17,31 @@ final class DataStore {
     var lastPollDate: Date? = nil
     var lastSeenCommentAt: [String: Date] = [:]     // [prNodeID: Date]
 
+    var hideDrafts: Bool {
+        get { persistence.hideDrafts }
+        set { persistence.hideDrafts = newValue }
+    }
+
+    var sortByActivity: Bool {
+        get { persistence.sortByActivity }
+        set { persistence.sortByActivity = newValue }
+    }
+
+    var visiblePullRequests: [PullRequest] {
+        let filtered = hideDrafts ? pullRequests.filter { !$0.isDraft } : pullRequests
+        if sortByActivity {
+            return filtered.sorted { $0.updatedAt > $1.updatedAt }
+        } else {
+            return filtered.sorted { $0.createdAt > $1.createdAt }
+        }
+    }
+
     // MARK: - Dependencies
     let persistence: UserDefaultsStore
+    var apiClient: GitHubAPIClient!
+    /// Records when this DataStore instance was created — used to determine
+    /// whether a newly-seen PR was opened *before* or *after* the app launched.
+    let startupDate: Date = Date()
 
     init() {
         self.persistence = UserDefaultsStore()
@@ -95,6 +118,9 @@ final class DataStore {
         lastPollDate = Date()
         isOffline = false
         tokenExpired = false
+        
+        NotificationCenter.default.post(name: .dataStoreUpdated, object: nil)
+        
         return diff
     }
 
@@ -108,25 +134,32 @@ final class DataStore {
         let oldCIMap = Dictionary(uniqueKeysWithValues: oldCI.map { ($0.repoFullName, $0) })
         let ignoreSelf = UserDefaults.standard.bool(forKey: "notif.ignoreSelfActions")
 
-        // Newly opened PRs (skip first-load blast when oldPRs was empty; skip drafts)
-        // Also fire if a known PR transitions from draft -> ready for review
-        let newlyOpened: [PullRequest] = oldPRs.isEmpty ? [] :
-            newPRs.filter { pr in
-                guard !pr.isDraft else { return false }
-                if ignoreSelf && pr.author.login == viewerLogin { return false }
-                if let old = oldPRMap[pr.id] {
-                    return old.isDraft
-                }
-                return true
+        // Newly opened PRs — fires when:
+        //   a) The PR didn't exist in the previous snapshot AND was created after app startup, OR
+        //   b) A known PR transitioned from draft → ready for review.
+        // Using createdAt > startupDate means we notify on the FIRST poll if the user just opened a PR,
+        // without blasting notifications for all pre-existing PRs on app launch.
+        let newlyOpened: [PullRequest] = newPRs.filter { pr in
+            guard !pr.isDraft else { return false }
+            if ignoreSelf && pr.author.login == viewerLogin { return false }
+            if let old = oldPRMap[pr.id] {
+                // Known PR: only notify if it just transitioned from draft → ready
+                return old.isDraft
             }
+            // New PR (not seen before): only notify if it was created after this session started
+            return pr.createdAt > startupDate
+        }
 
         // CI changes
         let newFailing = newCI.filter { $0.status == .failing && oldCIMap[$0.repoFullName]?.status != .failing }
         let fixed = newCI.filter { $0.status == .passing && oldCIMap[$0.repoFullName]?.status == .failing }
 
-        // Review request changes
-        let newRevReqs = newPRs.filter { pr in
-            !(oldPRMap[pr.id]?.requestedReviewerLogins.contains(viewerLogin) ?? false)
+        // Review request changes — skip first-load blast & only new requests for the viewer
+        let newRevReqs: [PullRequest] = oldPRs.isEmpty ? [] : newPRs.filter { pr in
+            guard pr.requestedReviewerLogins.contains(viewerLogin) else { return false }
+            guard !(oldPRMap[pr.id]?.requestedReviewerLogins.contains(viewerLogin) ?? false) else { return false }
+            if ignoreSelf && pr.author.login == viewerLogin { return false }
+            return true
         }
 
         // New approvals
@@ -210,4 +243,5 @@ enum OverallState { case error, warning, ok, offline, none }
 extension Notification.Name {
     static let openPRDetail = Notification.Name("com.dispatch.openPRDetail")
     static let showPreferences = Notification.Name("com.dispatch.showPreferences")
+    static let dataStoreUpdated = Notification.Name("com.dispatch.dataStoreUpdated")
 }
