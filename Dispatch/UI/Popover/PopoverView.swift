@@ -15,7 +15,10 @@ struct PopoverView: View {
             Divider().opacity(0.1)
             
             if dataStore.monitoredRepositories.isEmpty && !dataStore.isLoading {
-                emptySetupState
+                VStack {
+                    emptySetupState
+                    Spacer()
+                }
             } else {
                 ScrollView {
                     LazyVStack(spacing: 0) {

@@ -298,10 +298,19 @@ actor GitHubAPIClient {
         let url = URL(string: "https://github.com/login/device/code")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        let body = "client_id=\(clientID)&scope=repo%20read:user%20notifications"
-        request.httpBody = body.data(using: .utf8)
+        
+        var components = URLComponents()
+        components.queryItems = [
+            URLQueryItem(name: "client_id", value: clientID.trimmingCharacters(in: .whitespacesAndNewlines)),
+            URLQueryItem(name: "scope", value: "repo read:user notifications")
+        ]
+        
+        // GitHub device flow requires spaces to be %20, not +
+        let formBody = components.query?.replacingOccurrences(of: "+", with: "%20")
+        request.httpBody = formBody?.data(using: .utf8)
 
         let authSession = URLSession(configuration: .ephemeral)
         let (data, _) = try await authSession.data(for: request)
@@ -334,12 +343,18 @@ actor GitHubAPIClient {
         let url = URL(string: "https://github.com/login/oauth/access_token")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue(nil, forHTTPHeaderField: "X-GitHub-Api-Version")
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        let grantType = "urn:ietf:params:oauth:grant-type:device_code"
-        let body = "client_id=\(clientID)&device_code=\(deviceCode)&grant_type=\(grantType)"
-        request.httpBody = body.data(using: .utf8)
+        
+        var components = URLComponents()
+        components.queryItems = [
+            URLQueryItem(name: "client_id", value: clientID.trimmingCharacters(in: .whitespacesAndNewlines)),
+            URLQueryItem(name: "device_code", value: deviceCode.trimmingCharacters(in: .whitespacesAndNewlines)),
+            URLQueryItem(name: "grant_type", value: "urn:ietf:params:oauth:grant-type:device_code")
+        ]
+        request.httpBody = components.query?.data(using: .utf8)
 
         let (data, _) = try await session.data(for: request)
 

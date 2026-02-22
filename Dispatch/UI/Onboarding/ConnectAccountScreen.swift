@@ -31,14 +31,14 @@ struct ConnectAccountScreen: View {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 24)
             }
-
-            Spacer()
+            .padding(.bottom, 32)
 
             Picker("Auth Method", selection: $mode) {
                 Text("Device Flow (Recommended)").tag(AuthMode.deviceFlow)
                 Text("Personal Access Token").tag(AuthMode.pat)
             }
             .pickerStyle(.segmented)
+            .labelsHidden()
             .padding(.horizontal, 32)
             .padding(.bottom, 16)
 

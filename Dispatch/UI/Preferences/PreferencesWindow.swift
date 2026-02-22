@@ -536,6 +536,7 @@ struct ConnectAccountSheet: View {
                 Text("Personal Access Token").tag(ConnectMode.pat)
             }
             .pickerStyle(.segmented)
+            .labelsHidden()
 
             if mode == .deviceFlow {
                 deviceFlowContent
@@ -562,15 +563,30 @@ struct ConnectAccountSheet: View {
     private var deviceFlowContent: some View {
         VStack(spacing: 16) {
             if let info = deviceCodeInfo {
-                VStack(spacing: 8) {
-                    Text("Enter this code on GitHub:")
+                VStack(spacing: 12) {
+                    Text("Enter this code at github.com/login/device:")
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
-                    Text(info.userCode)
-                        .font(.system(size: 24, weight: .bold, design: .monospaced))
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .background(.secondary.opacity(0.1))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                    HStack(spacing: 10) {
+                        Text(info.userCode)
+                            .font(.system(size: 24, weight: .bold, design: .monospaced))
+                            .tracking(4)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(.secondary.opacity(0.1))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                        Button {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(info.userCode, forType: .string)
+                        } label: {
+                            Image(systemName: "doc.on.doc")
+                                .font(.system(size: 16))
+                        }
+                        .buttonStyle(.plain)
+                        .help("Copy code")
+                    }
 
                     Button("Open GitHub →") {
                         NSWorkspace.shared.open(info.verificationURI)
@@ -584,6 +600,7 @@ struct ConnectAccountSheet: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+                        .padding(.top, 4)
                     }
                 }
             } else {
