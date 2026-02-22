@@ -28,7 +28,12 @@ jobs:
           EOF
 
       - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode.app
+        run: sudo xcode-select -s /Applications/Xcode_16.1.app
+
+      - name: Generate Xcode Project
+        run: |
+          brew install xcodegen
+          xcodegen
 
       - name: Build App
         run: |
