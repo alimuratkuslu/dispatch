@@ -3,13 +3,21 @@ import AppKit
 
 @main
 struct DispatchApp: App {
-    // A single AppCore instance is created at startup. @State ensures it is
-    // owned by SwiftUI and lives for the entire lifetime of the app.
-    @State private var core = AppCore()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
         Settings {
             EmptyView()
         }
+    }
+}
+
+class AppDelegate: NSObject, NSApplicationDelegate {
+    var core: AppCore?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // Initialize AppCore only after the app has finished launching.
+        // This ensures NSStatusBar system is ready, preventing missing menu bar items on macOS Sequoia.
+        core = AppCore()
     }
 }
