@@ -14,7 +14,7 @@ final class AppCore {
     private var preferencesWindowController: PreferencesWindow?
     private var onboardingCoordinator: OnboardingCoordinator?
     private var statusBarController: StatusBarController?
-    nonisolated private var observers: [NSObjectProtocol] = []
+    private let observerStorage = ObserverStorage()
 
     init() {
         dataStore = DataStore()
@@ -76,7 +76,7 @@ final class AppCore {
             forName: .showPreferences, object: nil, queue: .main
         ) { [weak self] _ in Task { @MainActor [weak self] in self?.openPreferences() } }
 
-        observers = [openDetailToken, prefsToken]
+        observerStorage.tokens = [openDetailToken, prefsToken]
 
         if !UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
@@ -105,8 +105,13 @@ final class AppCore {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    // Initialization completes without custom deinit
+}
+
+final class ObserverStorage: @unchecked Sendable {
+    var tokens: [NSObjectProtocol] = []
     deinit {
-        observers.forEach { NotificationCenter.default.removeObserver($0) }
+        tokens.forEach { NotificationCenter.default.removeObserver($0) }
     }
 }
 
