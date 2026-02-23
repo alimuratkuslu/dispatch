@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/alimuratkuslu/dispatch/main/Dispatch/Assets.xcassets/AppIcon.appiconset/icon_128x128.png" width="128" height="128" />
+  <img src="https://raw.githubusercontent.com/alimuratkuslu/dispatch/main/Dispatch/Resources/Assets.xcassets/AppIcon.appiconset/icon_128x128.png" width="128" height="128" />
 </p>
 
 <h1 align="center">Dispatch</h1>
